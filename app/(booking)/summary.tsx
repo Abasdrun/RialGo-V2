@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Dimensions, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../supabase';
+
+const { width } = Dimensions.get('window');
 
 export default function SummaryScreen() {
   const params = useLocalSearchParams();
   const { 
     tripType, origin, destination, departureDate, returnDate, 
     trainType, cabinClass, cabinNumber, adults, children, 
-    depTime, arrTime, duration, selectedSeats, totalPrice 
+    depTime, arrTime, duration, selectedSeats, totalPrice, trip_id 
   } = params;
 
   const [paymentMethod, setPaymentMethod] = useState('qr');
@@ -20,7 +22,6 @@ export default function SummaryScreen() {
   const finalPrice = Number(totalPrice);
   const netPrice = tripType === 'round-trip' ? finalPrice * 2 : finalPrice;
 
-  // 🚀 Logic กดชำระเงิน ยิงเข้าโครงสร้าง DB เดิมของพี่ยอนเป๊ะๆ
   const handlePayment = async () => {
     setLoading(true);
     
@@ -31,11 +32,10 @@ export default function SummaryScreen() {
           return;
       }
 
-      // 1. หา ID ของสถานีต้นทางและปลายทาง (เพราะตาราง bookings ใช้ _id)
       const { data: stData, error: stError } = await supabase
         .from('stations')
         .select('id, station_name')
-        .in('station_name', [origin, destination]);
+        .in('station_name', [String(origin), String(destination)]);
 
       if (stError || !stData || stData.length < 2) {
         Alert.alert('ข้อผิดพลาด', 'ไม่พบข้อมูลสถานีในระบบ');
@@ -45,38 +45,35 @@ export default function SummaryScreen() {
       const originId = stData.find(s => s.station_name === origin)?.id;
       const destId = stData.find(s => s.station_name === destination)?.id;
 
-      // 2. ยิงเข้าตาราง bookings ของพี่ยอน (ไม่มั่วคอลัมน์แล้ว!)
       const { error } = await supabase.from('bookings').insert([
           {
               user_id: user.id,
               origin_station_id: originId,
               destination_station_id: destId,
               total_price: netPrice,
-              status: 'Confirmed'
-              // trip_id กับ coupon_id ปล่อยว่าง (null) ไปก่อนเพราะเราใช้ข้อมูลจำลอง
+              status: 'Confirmed',
+              trip_id: trip_id, 
+              selected_seats: String(selectedSeats) 
           }
       ]);
 
       if (error) throw error;
 
-      // 📌 แทรกโค้ดยิงแจ้งเตือนตรงนี้ (หลัง insert bookings สำเร็จ)
       await supabase.from('notifications').insert([{
           user_id: user.id,
           title: 'จองตั๋วสำเร็จ! 🎉',
           message: `การจองตั๋วของคุณจาก ${origin} ไปยัง ${destination} สำหรับ ${totalPax} ท่าน ได้รับการยืนยันแล้ว`,
           type: 'ticket'
       }]);
-      // 📌 จบการแทรกโค้ดแจ้งเตือน
 
-      // 3. จ่ายสำเร็จ! ส่งข้อมูลทั้งหมดไปหน้า My Ticket (Phase 5) เพื่อโชว์ตั๋ว
       Alert.alert(
           'ชำระเงินสำเร็จ!', 
           'บันทึกตั๋วของคุณเรียบร้อยแล้ว เตรียมตัวเดินทางได้เลย 🚂',
           [{ 
             text: 'ดูตั๋วของฉัน', 
             onPress: () => router.push({
-              pathname: '/my-ticket', // ✅ แก้ตรงนี้ให้ชี้ไปที่ /my-ticket แล้ว!
-              params: { ...params } // ส่ง params ไปโชว์หน้าตั๋วต่อ
+              pathname: '/my-ticket', 
+              params: { ...params } 
             }) 
           }]
       );
@@ -88,147 +85,240 @@ export default function SummaryScreen() {
     }
   };
 
-  // 🎟️ สลิปตั๋ว
-  const renderTicketCard = (type: 'go' | 'return', dateStr: string, price: number) => (
-    <View style={styles.ticketCard}>
-        <View style={styles.cardHeader}>
-            <View style={[styles.badge, { backgroundColor: type === 'go' ? '#4CAF50' : '#F44336' }]}>
-                <Text style={styles.badgeText}>{type === 'go' ? 'ขาไป' : 'ขากลับ'}</Text>
-            </View>
-            <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                <Ionicons name="calendar-outline" size={14} color="#333" />
-                <Text style={styles.dateText}> {dateStr} | {duration}</Text>
-            </View>
-        </View>
+  const formatSeatsWithType = (seatsStr: string) => {
+    if (!seatsStr) return '';
+    const seatsArray = seatsStr.split(',').map(s => s.trim());
+    const formatted = seatsArray.map(s => {
+      const parts = s.split('-'); 
+      if (parts.length === 2) {
+        const seatNum = parseInt(parts[1]);
+        const seatType = seatNum % 2 !== 0 ? 'ชั้นล่าง' : 'ชั้นบน';
+        return `${seatNum} (${seatType})`;
+      }
+      return s;
+    });
+    return `${totalPax} คน - ที่นั่งหมายเลข ${formatted.join(', ')}`;
+  };
 
-        <View style={styles.journeyContent}>
-            <View style={styles.timelineCol}>
-                <Text style={styles.timeText}>{depTime}</Text>
-                <Ionicons name="train" size={20} color="#333" style={{marginVertical: 5}} />
-                <Text style={styles.timeText}>{arrTime}</Text>
-            </View>
-            <View style={styles.timelineLine}>
-                <View style={styles.dotFilled} />
-                <View style={styles.verticalLine} />
-                <View style={styles.dotOutline} />
-            </View>
-            <View style={styles.stationCol}>
-                <Text style={styles.stationText}>{type === 'go' ? origin : destination}</Text>
-                <Text style={[styles.stationText, {marginTop: 'auto'}]}>{type === 'go' ? destination : origin}</Text>
-            </View>
-        </View>
+  const renderTicketCard = (type: 'go' | 'return', price: number) => {
+    const isGo = type === 'go';
+    const badgeColor = isGo ? '#E8F5E9' : '#FCE4EC';
+    const badgeTextColor = isGo ? '#4CAF50' : '#E91E63';
+    
+    const cardOrigin = isGo ? origin : destination;
+    const cardDest = isGo ? destination : origin;
+    const cardDepTime = isGo ? depTime : arrTime; 
+    const cardArrTime = isGo ? arrTime : depTime;
 
-        <View style={styles.ticketDetails}>
-            <Text style={styles.detailLabel}>ราคารวมสำหรับ {totalPax} คน</Text>
-            <Text style={styles.detailLabel}>ชั้นโดยสาร {trainType}</Text>
-            <Text style={styles.detailLabel}>ตู้ {cabinNumber}</Text>
-            <Text style={styles.detailLabel}>ที่นั่ง {selectedSeats}</Text>
-            <Text style={styles.priceText}>THB {price.toLocaleString('en-US', {minimumFractionDigits: 2})}</Text>
-        </View>
-    </View>
-  );
+    return (
+      <View style={styles.ticketCard}>
+          <View style={styles.badgeRow}>
+            <View style={[styles.badge, { backgroundColor: badgeColor }]}>
+                <Text style={[styles.badgeText, { color: badgeTextColor }]}>{isGo ? 'ขาไป' : 'ขากลับ'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.routeHeaderRow}>
+            <Text style={styles.cityTextMain}>{cardOrigin}</Text>
+            <View style={styles.arrowContainer}>
+                <Text style={styles.durationSmallText}>{duration}</Text>
+                <Ionicons name="arrow-forward" size={20} color="#BDBDBD" />
+            </View>
+            <Text style={styles.cityTextMain}>{cardDest}</Text>
+          </View>
+
+          <View style={styles.routeTimeRow}>
+            <Text style={styles.timeTextMain}>{cardDepTime}</Text>
+            <Text style={styles.timeTextMain}>{cardArrTime}</Text>
+          </View>
+
+          <View style={styles.infoGrid}>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabelLeft}>{trainType}</Text>
+              <Text style={styles.infoLabelRight}>{cabinClass}</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabelLeft}>ตู้ที่ {cabinNumber}</Text>
+              <Text style={styles.infoLabelRight} numberOfLines={1}>{formatSeatsWithType(String(selectedSeats))}</Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.priceRow}>
+            <Text style={styles.totalText}>ยอดรวม</Text>
+            <Text style={styles.priceTextMain}>THB {price.toLocaleString('en-US')}</Text>
+          </View>
+      </View>
+    );
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <View style={styles.headerTitleBox}>
-          <Ionicons name="sync" size={20} color="#333" />
-          <Text style={styles.headerTitle}>ชำระเงิน</Text>
-        </View>
-        <View style={{width: 40}} />
+    <View style={styles.container}>
+      
+      {/* 🌊 เลเยอร์ล่างสุด: พื้นหลังสีน้ำเงิน (ตั้งเป็น absolute ไม่ให้กวนหน้าอื่น) */}
+      <View style={styles.blueHeaderBg}>
+        <View style={styles.headerGraphicCircle} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      {/* 📦 เลเยอร์ด้านบน: เนื้อหาทั้งหมด */}
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
         
-        {/* 🎟️ สลิปขาไป */}
-        {renderTicketCard('go', String(departureDate), finalPrice)}
-
-        {/* 🎟️ สลิปขากลับ */}
-        {tripType === 'round-trip' && renderTicketCard('return', String(returnDate), finalPrice)}
-
-        {/* 💰 ยอดสุทธิ */}
-        <View style={styles.netPriceBox}>
-            <Text style={styles.netLabel}>ยอดสุทธิ</Text>
-            <Text style={styles.netPriceText}>THB {netPrice.toLocaleString('en-US', {minimumFractionDigits: 2})}</Text>
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}>
+            <Ionicons name="chevron-back" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>ชำระเงิน</Text>
+          <View style={{width: 40}} />
         </View>
 
-        {/* 💳 ช่องทางการชำระเงิน */}
-        <Text style={styles.paymentSectionTitle}>ช่องทางการชำระเงิน</Text>
-        
-        <TouchableOpacity style={styles.paymentOption} onPress={() => setPaymentMethod('bank')}>
-            <View style={styles.payIconBox}><MaterialCommunityIcons name="bank-outline" size={24} color="#333" /></View>
-            <View style={{flex: 1, marginLeft: 15}}>
-                <Text style={styles.payMainText}>ตัดบัญชีธนาคาร</Text>
-                <Text style={styles.paySubText}>ธนาคารกสิกรไทย</Text>
-            </View>
-            <Ionicons name={paymentMethod === 'bank' ? "checkmark-circle" : "ellipse-outline"} size={28} color={paymentMethod === 'bank' ? "#333" : "#E0E0E0"} />
-        </TouchableOpacity>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          
+          {renderTicketCard('go', finalPrice)}
+          {tripType === 'round-trip' && renderTicketCard('return', finalPrice)}
 
-        <TouchableOpacity style={styles.paymentOption} onPress={() => setPaymentMethod('credit')}>
-            <View style={styles.payIconBox}><Ionicons name="card-outline" size={24} color="#333" /></View>
-            <View style={{flex: 1, marginLeft: 15}}>
-                <Text style={styles.payMainText}>บัตรเครดิต/บัตรเดบิต</Text>
-            </View>
-            <Ionicons name={paymentMethod === 'credit' ? "checkmark-circle" : "ellipse-outline"} size={28} color={paymentMethod === 'credit' ? "#333" : "#E0E0E0"} />
-        </TouchableOpacity>
+          <Text style={styles.paymentSectionTitle}>ช่องทางการชำระเงิน</Text>
+          
+          <View style={styles.paymentCard}>
+            <TouchableOpacity style={styles.paymentOption} onPress={() => setPaymentMethod('credit')}>
+                <View style={[styles.payIconBox, {backgroundColor: '#EBE4FF'}]}><Ionicons name="card" size={20} color="#5E35B1" /></View>
+                <View style={{flex: 1, marginLeft: 15}}>
+                    <Text style={styles.payMainText}>บัตรเครดิต / เดบิต</Text>
+                    <Text style={styles.paySubText}>Visa, Mastercard, JCB</Text>
+                </View>
+                <Ionicons name={paymentMethod === 'credit' ? "checkmark-circle" : "ellipse-outline"} size={24} color={paymentMethod === 'credit' ? "#5E35B1" : "#E0E0E0"} />
+            </TouchableOpacity>
 
-        <TouchableOpacity style={styles.paymentOption} onPress={() => setPaymentMethod('qr')}>
-            <View style={styles.payIconBox}><Ionicons name="qr-code-outline" size={24} color="#333" /></View>
-            <View style={{flex: 1, marginLeft: 15}}>
-                <Text style={styles.payMainText}>QR Code</Text>
-            </View>
-            <Ionicons name={paymentMethod === 'qr' ? "checkmark-circle" : "ellipse-outline"} size={28} color={paymentMethod === 'qr' ? "#333" : "#E0E0E0"} />
-        </TouchableOpacity>
+            <TouchableOpacity style={styles.paymentOption} onPress={() => setPaymentMethod('promptpay')}>
+                <View style={[styles.payIconBox, {backgroundColor: '#D4F1E5'}]}><Ionicons name="card-outline" size={20} color="#4CAF50" /></View>
+                <View style={{flex: 1, marginLeft: 15}}>
+                    <Text style={styles.payMainText}>PromptPay</Text>
+                    <Text style={styles.paySubText}>ชำระด้วยพร้อมเพย์</Text>
+                </View>
+                <Ionicons name={paymentMethod === 'promptpay' ? "checkmark-circle" : "ellipse-outline"} size={24} color={paymentMethod === 'promptpay' ? "#5E35B1" : "#E0E0E0"} />
+            </TouchableOpacity>
 
-        {/* ✅ ปุ่มยืนยันชำระเงิน */}
+            <TouchableOpacity style={styles.paymentOption} onPress={() => setPaymentMethod('truemoney')}>
+                <View style={[styles.payIconBox, {backgroundColor: '#FFF59D'}]}><Ionicons name="wallet" size={20} color="#FBC02D" /></View>
+                <View style={{flex: 1, marginLeft: 15}}>
+                    <Text style={styles.payMainText}>True Money Wallet</Text>
+                    <Text style={styles.paySubText}>ทรูมันนี่วอลเล็ท</Text>
+                </View>
+                <Ionicons name={paymentMethod === 'truemoney' ? "checkmark-circle" : "ellipse-outline"} size={24} color={paymentMethod === 'truemoney' ? "#5E35B1" : "#E0E0E0"} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.paymentOption, {borderBottomWidth: 0, paddingBottom: 0, marginBottom: 0}]} onPress={() => setPaymentMethod('qr')}>
+                <View style={[styles.payIconBox, {backgroundColor: '#EBE4FF'}]}><Ionicons name="qr-code" size={20} color="#5E35B1" /></View>
+                <View style={{flex: 1, marginLeft: 15}}>
+                    <Text style={styles.payMainText}>QR Code</Text>
+                    <Text style={styles.paySubText}>สแกนจ่ายผ่านธนาคาร</Text>
+                </View>
+                <Ionicons name={paymentMethod === 'qr' ? "checkmark-circle" : "ellipse-outline"} size={24} color={paymentMethod === 'qr' ? "#5E35B1" : "#E0E0E0"} />
+            </TouchableOpacity>
+          </View>
+
+        </ScrollView>
+      </SafeAreaView>
+
+      <View style={styles.bottomFooter}>
+        <View style={styles.footerPriceRow}>
+          <Text style={styles.footerLabel}>ยอดที่ต้องชำระ:</Text>
+          <Text style={styles.footerPriceValue}>THB {netPrice.toLocaleString('en-US')}</Text>
+        </View>
         <TouchableOpacity 
-            style={[styles.confirmBtn, loading && {backgroundColor: '#A5D6A7'}]} 
+            style={[styles.confirmBtn, loading && {opacity: 0.7}]} 
             onPress={handlePayment}
             disabled={loading}
         >
-            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.confirmBtnText}>ยืนยันการชำระเงิน</Text>}
+            {loading ? <ActivityIndicator color="#FFF" /> : (
+              <>
+                <Ionicons name="checkmark" size={20} color="#FFF" style={{marginRight: 10}} />
+                <Text style={styles.confirmBtnText}>ยืนยันการชำระเงิน</Text>
+              </>
+            )}
         </TouchableOpacity>
+      </View>
 
-      </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFAFA' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
-  headerTitleBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 25, height: 45, marginHorizontal: 15, paddingHorizontal: 15, elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
-  headerTitle: { marginLeft: 10, fontSize: 14, fontWeight: 'bold', color: '#333' },
-  scrollContent: { padding: 20, paddingBottom: 50 },
-  ticketCard: { backgroundColor: '#FFF', borderRadius: 20, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E0E0E0', elevation: 2 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  badge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginRight: 10 },
-  badgeText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
-  dateText: { fontSize: 12, fontWeight: 'bold', color: '#333' },
-  journeyContent: { flexDirection: 'row', height: 80, marginBottom: 20 },
-  timelineCol: { justifyContent: 'space-between', alignItems: 'center', width: 50 },
-  timeText: { fontSize: 14, fontWeight: 'bold', color: '#333' },
-  timelineLine: { width: 20, alignItems: 'center', paddingVertical: 5 },
-  dotFilled: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#333' },
-  verticalLine: { flex: 1, width: 2, backgroundColor: '#333', marginVertical: 2 },
-  dotOutline: { width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderColor: '#333', backgroundColor: '#FFF' },
-  stationCol: { flex: 1, justifyContent: 'flex-start', marginLeft: 10 },
-  stationText: { fontSize: 14, fontWeight: 'bold', color: '#333' },
-  ticketDetails: { alignItems: 'flex-end', borderTopWidth: 1, borderTopColor: '#F5F5F5', paddingTop: 15 },
-  detailLabel: { fontSize: 10, color: '#757575', marginBottom: 2 },
-  priceText: { fontSize: 16, fontWeight: 'bold', color: '#E91E63', marginTop: 5 },
-  netPriceBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFF', padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 30 },
-  netLabel: { fontSize: 16, color: '#757575' },
-  netPriceText: { fontSize: 18, fontWeight: 'bold', color: '#E91E63' },
-  paymentSectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 15 },
-  paymentOption: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 15, borderRadius: 20, marginBottom: 15, borderWidth: 1, borderColor: '#E0E0E0' },
-  payIconBox: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
-  payMainText: { fontSize: 14, fontWeight: 'bold', color: '#333' },
-  paySubText: { fontSize: 10, color: '#757575', marginTop: 2 },
-  confirmBtn: { backgroundColor: '#4CAF50', height: 55, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginTop: 20, elevation: 3 },
-  confirmBtnText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' }
+  container: { flex: 1, backgroundColor: '#F9F9F9' },
+  safeArea: { flex: 1 },
+  
+  // 🚀 โครงสร้าง Layer ใหม่: ดันพื้นหลังสีน้ำเงินไปอยู่ด้านล่างสุด
+  blueHeaderBg: { 
+    position: 'absolute', 
+    top: 0, left: 0, right: 0, 
+    height: 250, 
+    backgroundColor: '#2E3165', 
+    borderBottomLeftRadius: 40, 
+    borderBottomRightRadius: 40, 
+    overflow: 'hidden',
+    zIndex: 0 // แผ่นหลังสุด
+  },
+  headerGraphicCircle: { 
+    position: 'absolute', right: -50, top: -50, 
+    width: 300, height: 300, borderRadius: 150, 
+    backgroundColor: 'rgba(255,255,255,0.05)' 
+  },
+  
+  headerTopRow: { 
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', 
+    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 15,
+    zIndex: 10 // ปุ่มกดย้อนกลับต้องอยู่บนสุด!
+  },
+  backBtnCircle: { 
+    width: 40, height: 40, borderRadius: 20, 
+    backgroundColor: 'rgba(255,255,255,0.1)', 
+    justifyContent: 'center', alignItems: 'center' 
+  },
+  headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+
+  // 🚀 เนื้อหาการ์ดจะเรียงตัวสวยงามปกติ ไม่โดนตัดขอบแล้ว
+  scrollContent: { 
+    paddingHorizontal: 20, 
+    paddingTop: 10, 
+    paddingBottom: 150,
+    zIndex: 5 
+  },
+  
+  ticketCard: { backgroundColor: '#FFF', borderRadius: 25, padding: 20, marginBottom: 20, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10 },
+  badgeRow: { marginBottom: 15, alignItems: 'flex-start' },
+  badge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  badgeText: { fontSize: 10, fontWeight: 'bold' },
+  
+  routeHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cityTextMain: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  arrowContainer: { alignItems: 'center', flex: 1, paddingHorizontal: 10 },
+  durationSmallText: { fontSize: 9, color: '#9E9E9E', marginBottom: -2 },
+  
+  routeTimeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 5, marginBottom: 20 },
+  timeTextMain: { fontSize: 12, color: '#757575' },
+
+  infoGrid: { marginBottom: 10 },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
+  infoLabelLeft: { fontSize: 11, color: '#757575', width: 80 },
+  infoLabelRight: { fontSize: 11, color: '#757575', flex: 1, textAlign: 'left' },
+
+  divider: { height: 1, backgroundColor: '#EEEEEE', marginVertical: 15 },
+  
+  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  totalText: { fontSize: 12, fontWeight: 'bold', color: '#333' },
+  priceTextMain: { fontSize: 16, fontWeight: 'bold', color: '#5E35B1' },
+
+  paymentSectionTitle: { fontSize: 14, color: '#757575', marginBottom: 10, marginLeft: 5 },
+  paymentCard: { backgroundColor: '#FFF', borderRadius: 25, padding: 20, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, marginBottom: 20, borderWidth: 1, borderColor: '#EEEEEE' },
+  paymentOption: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', marginBottom: 5 },
+  payIconBox: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  payMainText: { fontSize: 13, fontWeight: 'bold', color: '#333' },
+  paySubText: { fontSize: 10, color: '#9E9E9E', marginTop: 2 },
+
+  bottomFooter: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#EBE4FF', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25, paddingBottom: 35, elevation: 20, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 10 },
+  footerPriceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, paddingHorizontal: 10 },
+  footerLabel: { color: '#5E35B1', fontSize: 14, fontWeight: 'bold' },
+  footerPriceValue: { color: '#5E35B1', fontSize: 18, fontWeight: 'bold' },
+  confirmBtn: { backgroundColor: '#3F51B5', flexDirection: 'row', paddingVertical: 15, borderRadius: 25, justifyContent: 'center', alignItems: 'center', elevation: 3 },
+  confirmBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 }
 });

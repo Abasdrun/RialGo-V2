@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Image, Modal, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Image, Modal, FlatList, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -12,7 +12,6 @@ export default function BookTicketScreen() {
   const [departureDate, setDepartureDate] = useState('เลือกวันเดินทาง');
   const [returnDate, setReturnDate] = useState('เลือกวันกลับ');
   
-  // 📌 คง State ผู้โดยสารไว้เหมือนเดิม
   const [passengers, setPassengers] = useState({ adult: 1, child: 0, infant: 0 });
 
   const [trainType, setTrainType] = useState('รถด่วนพิเศษ');
@@ -26,15 +25,19 @@ export default function BookTicketScreen() {
 
   const [activeModal, setActiveModal] = useState<string | null>(null);
 
-  // 📅 States สำหรับตัวปฏิทินแบบใหม่ (เก็บระยะห่างเดือน)
   const [depMonthOffset, setDepMonthOffset] = useState(0);
   const [retMonthOffset, setRetMonthOffset] = useState(0);
+
+  const [recentStations, setRecentStations] = useState<any[]>([]);
+  const [selectedRegion, setSelectedRegion] = useState('ทั้งหมด');
+
+  // 🆕 State สำหรับจำประวัติการค้นหาล่าสุด (เส้นทาง + วันที่)
+  const [recentSearches, setRecentSearches] = useState<any[]>([]);
 
   useEffect(() => {
     fetchStations();
   }, []);
 
-  // 🛡️ ฟังก์ชันเงื่อนไขต่างๆ อยู่ครบ ไม่มีการดัดแปลง!
   const fetchStations = async () => {
     setLoadingStations(true);
     const { data } = await supabase.from('stations').select('*').order('km', { ascending: true });
@@ -60,12 +63,11 @@ export default function BookTicketScreen() {
     }
   };
 
-  // 📅 ฟังก์ชันเจเนอเรตปฏิทินแบบ 1 เดือน (เพื่อรองรับการเลื่อนลูกศร < >)
   const getSingleMonthData = (offset: number) => {
     const now = new Date();
     const date = new Date(now.getFullYear(), now.getMonth() + offset, 1);
     const mIdx = date.getMonth();
-    const year = date.getFullYear() + 543; // ปี พ.ศ.
+    const year = date.getFullYear() + 543;
     const days = new Date(date.getFullYear(), mIdx + 1, 0).getDate();
     const start = date.getDay();
     const monthNames = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
@@ -94,10 +96,92 @@ export default function BookTicketScreen() {
     return { bg: '#F5F5F5', color: '#757575', icon: 'train' }; 
   };
 
-  // 📝 องค์ประกอบ Calendar 1 กล่อง (ใช้ซ้ำได้ทั้งไปและกลับ)
+  const getStationStyle = (item: any) => {
+    const region = item.region || ''; 
+    
+    if (region === 'ใต้') {
+      return { bg: '#FCE4EC', iconColor: '#E91E63', badgeText: 'สายใต้', badgeBg: '#E8F5E9', badgeTextColor: '#4CAF50' };
+    }
+    if (region === 'เหนือ') {
+      return { bg: '#E0E0E0', iconColor: '#757575', badgeText: 'สายเหนือ', badgeBg: '#BDBDBD', badgeTextColor: '#333' };
+    }
+    if (region === 'อีสาน') {
+      return { bg: '#EDE7F6', iconColor: '#5E35B1', badgeText: 'สายตะวันออกเฉียงเหนือ', badgeBg: '#D1C4E9', badgeTextColor: '#5E35B1' };
+    }
+    if (region === 'กลาง') {
+      return { bg: '#FFF3E0', iconColor: '#FF9800', badgeText: 'สายกลาง', badgeBg: '#FFE0B2', badgeTextColor: '#FF9800' };
+    }
+    
+    return { bg: '#D1C4E9', iconColor: '#5E35B1', badgeText: '', badgeBg: 'transparent', badgeTextColor: 'transparent' };
+  };
+
+  const handleSelectStation = (item: any) => {
+    if (selectingType === 'origin' && item.station_name === destination) {
+      Alert.alert('แจ้งเตือน', 'ไม่สามารถเลือกสถานีต้นทางและปลายทางซ้ำกันได้ครับ');
+      return;
+    }
+    if (selectingType === 'destination' && item.station_name === origin) {
+      Alert.alert('แจ้งเตือน', 'ไม่สามารถเลือกสถานีต้นทางและปลายทางซ้ำกันได้ครับ');
+      return;
+    }
+
+    if (selectingType === 'origin') setOrigin(item.station_name);
+    else setDestination(item.station_name);
+
+    setRecentStations(prev => {
+      const filtered = prev.filter(s => s.id !== item.id);
+      return [item, ...filtered].slice(0, 3); 
+    });
+
+    setActiveModal(null);
+    setSearchQuery('');
+    setSelectedRegion('ทั้งหมด'); 
+  };
+
+  // 🚀 ฟังก์ชันทำงานเมื่อกดปุ่ม "ค้นหาเที่ยว" (เพิ่ม Validation และจดจำประวัติ)
+  const handleSearchSubmit = () => {
+    // 1. ดักกรณียังไม่กรอกข้อมูลสำคัญ
+    if (origin.includes('เลือก') || destination.includes('เลือก')) {
+      Alert.alert('กรอกข้อมูลไม่ครบ', 'กรุณาเลือกสถานีต้นทาง และสถานีปลายทางให้เรียบร้อยครับ');
+      return;
+    }
+    if (departureDate.includes('เลือก')) {
+      Alert.alert('กรอกข้อมูลไม่ครบ', 'กรุณาเลือกวันเดินทางให้เรียบร้อยครับ');
+      return;
+    }
+    if (tripType === 'round-trip' && returnDate.includes('เลือก')) {
+      Alert.alert('กรอกข้อมูลไม่ครบ', 'คุณเลือกแบบไป-กลับ กรุณาระบุวันกลับให้เรียบร้อยครับ');
+      return;
+    }
+
+    // 2. บันทึกประวัติการค้นหาล่าสุด (ดันของใหม่ไปหน้าสุด และตัดให้เหลือ 5 อัน)
+    const newSearch = { origin, destination, date: departureDate };
+    setRecentSearches(prev => {
+      // เอาอันที่ซ้ำกันออกก่อน
+      const filtered = prev.filter(s => !(s.origin === origin && s.destination === destination));
+      return [newSearch, ...filtered].slice(0, 5); 
+    });
+
+    // 3. ไปหน้าค้นหาผลลัพธ์
+    router.push({
+      pathname: '/(booking)/search-results',
+      params: { 
+        origin, 
+        destination, 
+        departureDate, 
+        trainType, 
+        cabinClass, 
+        cabinNumber, 
+        adults: passengers.adult, 
+        children: passengers.child, 
+        infants: passengers.infant 
+      }
+    });
+  };
+
   const renderCalendarCard = (type: 'dep' | 'ret') => {
     const isRet = type === 'ret';
-    const isDisabled = isRet && tripType === 'one-way'; // จางลงและกดไม่ได้ถ้าเป็นเที่ยวเดียว
+    const isDisabled = isRet && tripType === 'one-way'; 
     const offset = isRet ? retMonthOffset : depMonthOffset;
     const setOffset = isRet ? setRetMonthOffset : setDepMonthOffset;
     const monthData = getSingleMonthData(offset);
@@ -120,21 +204,14 @@ export default function BookTicketScreen() {
         </View>
 
         <View pointerEvents={isDisabled ? 'none' : 'auto'} style={styles.daysGrid}>
-          {/* หัวตารางวัน */}
           {['Su','Mo','Tu','We','Th','Fr','Sa'].map((d, idx) => (
             <Text key={d} style={[styles.dayHead, (idx === 0 || idx === 6) && {color: '#E91E63'}]}>{d}</Text>
           ))}
-          
-          {/* ช่องว่างต้นเดือน */}
           {monthData.empty.map(i => <View key={`e-${i}`} style={styles.dayCell} />)}
-          
-          {/* วันที่ทั้งหมด */}
           {monthData.days.map((day, idx) => {
             const dayOfWeek = (monthData.empty.length + idx) % 7;
             const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; 
             const dateStr = `${day} ${monthData.title}`;
-            
-            // เช็คว่าตรงกับวันที่เลือกอยู่ไหม
             const isSelected = isRet ? returnDate === dateStr : departureDate === dateStr;
 
             return (
@@ -144,7 +221,6 @@ export default function BookTicketScreen() {
                 onPress={() => { 
                   if(isRet) setReturnDate(dateStr); 
                   else setDepartureDate(dateStr); 
-                  // ไม่ปิด Modal ทันที รอให้กด "ยืนยันวัน" ตามภาพเรฟ
                 }}
               >
                 <Text style={[styles.dayText, isWeekend && {color: '#E91E63'}, isSelected && {color: '#FFF'}]}>{day}</Text>
@@ -156,10 +232,23 @@ export default function BookTicketScreen() {
     );
   };
 
+  const regionFilters = [
+    { id: 'ทั้งหมด', label: 'ทั้งหมด' },
+    { id: 'กลาง', label: 'สายกลาง' },
+    { id: 'เหนือ', label: 'สายเหนือ' },
+    { id: 'อีสาน', label: 'สายตะวันออกเฉียงเหนือ' },
+    { id: 'ใต้', label: 'สายใต้' },
+  ];
+
+  const filteredAllStations = stations.filter(s => {
+    const matchSearch = s.station_name.includes(searchQuery) || (s.province && s.province.includes(searchQuery));
+    const matchRegion = selectedRegion === 'ทั้งหมด' || s.region === selectedRegion;
+    return matchSearch && matchRegion;
+  });
+
   return (
     <View style={styles.mainContainer}>
       
-      {/* 🌊 Header พื้นสีน้ำเงินเข้ม */}
       <View style={styles.blueHeaderBg}>
         <View style={styles.headerGraphicCircle} />
         
@@ -172,7 +261,6 @@ export default function BookTicketScreen() {
             <View style={{width: 40}} />
           </View>
 
-          {/* 🔘 Tab เที่ยวเดียว / ไปกลับ */}
           <View style={styles.tabContainer}>
             <TouchableOpacity style={[styles.tab, tripType === 'one-way' && styles.tabActive]} onPress={() => setTripType('one-way')}>
               <Text style={[styles.tabText, tripType === 'one-way' && styles.tabTextActive]}>เที่ยวเดียว</Text>
@@ -186,7 +274,6 @@ export default function BookTicketScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {/* 🗺️ การ์ด 1: เส้นทางและวันที่ */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>เส้นทาง</Text>
           
@@ -215,7 +302,6 @@ export default function BookTicketScreen() {
           </View>
 
           <View style={styles.dateRow}>
-            {/* 📌 เปลี่ยนมาใช้การเปิด activeModal = 'calendar' อันเดียวทั้งคู่เลย */}
             <TouchableOpacity style={styles.dateBox} onPress={() => setActiveModal('calendar')}>
               <View style={styles.dateTitleRow}>
                 <Ionicons name="calendar-outline" size={14} color="#757575" />
@@ -226,7 +312,7 @@ export default function BookTicketScreen() {
 
             <TouchableOpacity 
               style={[styles.dateBox, tripType === 'one-way' && styles.dateBoxDisabled]} 
-              onPress={() => setActiveModal('calendar')} // เปิด Modal เดียวกัน
+              onPress={() => setActiveModal('calendar')} 
               disabled={tripType === 'one-way'}
             >
               <View style={styles.dateTitleRow}>
@@ -240,7 +326,6 @@ export default function BookTicketScreen() {
           </View>
         </View>
 
-        {/* 👥 การ์ด 2: จำนวนผู้โดยสาร */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>จำนวนผู้โดยสาร</Text>
           
@@ -274,7 +359,7 @@ export default function BookTicketScreen() {
             <View style={[styles.iconBox, {backgroundColor: '#F9E8B6'}]}><MaterialCommunityIcons name="human-cane" size={20} color="#FBC02D" /></View>
             <View style={styles.passengerInfo}>
               <Text style={styles.passengerType}>ผู้สูงอายุ</Text>
-              <Text style={styles.passengerSub}>อายุ 60 ปีขึ้นไป (ลด 50%)</Text>
+              <Text style={styles.passengerSub}>อายุ 60 ปีขึ้นไป</Text>
             </View>
             <View style={styles.counterGroup}>
               <TouchableOpacity style={styles.countBtn} onPress={() => updatePassenger('infant', 'sub')}><Text style={styles.countBtnText}>−</Text></TouchableOpacity>
@@ -284,7 +369,6 @@ export default function BookTicketScreen() {
           </View>
         </View>
 
-        {/* 💺 การ์ด 3: ชั้นและตู้โดยสาร */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>ชั้นและตู้โดยสาร</Text>
           
@@ -316,27 +400,37 @@ export default function BookTicketScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* 🕒 การค้นหาล่าสุด */}
-        <View style={styles.recentSection}>
-          <View style={styles.recentHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Ionicons name="search" size={20} color="#333" />
-              <Text style={styles.recentTitle}> การค้นหาล่าสุด</Text>
-            </View>
-            <TouchableOpacity><Text style={styles.seeAllText}>ดูทั้งหมด</Text></TouchableOpacity>
-          </View>
-          
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingRight: 20}}>
-            {['เชียงใหม่', 'หัวหิน', 'ชลบุรี'].map((city, index) => (
-              <View key={index} style={styles.recentCard}>
-                <Text style={styles.recentCityText}>กรุงเทพ</Text>
-                <Ionicons name="arrow-down" size={14} color="#757575" style={{marginVertical: 2}} />
-                <Text style={styles.recentCityText}>{city}</Text>
-                <Text style={styles.recentDateText}>15 ก.พ. 2026</Text>
+        {/* 🕒 การค้นหาล่าสุด (ผูกกับ State ของจริง) */}
+        {recentSearches.length > 0 && (
+          <View style={styles.recentSection}>
+            <View style={styles.recentHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="search" size={20} color="#333" />
+                <Text style={styles.recentTitle}> การค้นหาล่าสุด</Text>
               </View>
-            ))}
-          </ScrollView>
-        </View>
+              <TouchableOpacity onPress={() => setRecentSearches([])}><Text style={styles.seeAllText}>ล้างประวัติ</Text></TouchableOpacity>
+            </View>
+            
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingRight: 20}}>
+              {recentSearches.map((item, index) => (
+                <TouchableOpacity 
+                  key={index} 
+                  style={styles.recentCard}
+                  onPress={() => {
+                    setOrigin(item.origin);
+                    setDestination(item.destination);
+                    setDepartureDate(item.date);
+                  }}
+                >
+                  <Text style={styles.recentCityText} numberOfLines={1}>{item.origin}</Text>
+                  <Ionicons name="arrow-down" size={14} color="#757575" style={{marginVertical: 2}} />
+                  <Text style={styles.recentCityText} numberOfLines={1}>{item.destination}</Text>
+                  <Text style={styles.recentDateText}>{item.date}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
       </ScrollView>
 
@@ -344,10 +438,7 @@ export default function BookTicketScreen() {
       <View style={styles.bottomSearchContainer}>
         <TouchableOpacity 
           style={styles.searchBtn} 
-          onPress={() => router.push({
-            pathname: '/(booking)/search-results',
-            params: { origin, destination, departureDate, trainType, cabinClass, cabinNumber, adults: passengers.adult, children: passengers.child, infants: passengers.infant }
-          })}
+          onPress={handleSearchSubmit} // 🚀 เปลี่ยนมาเรียกใช้ฟังก์ชันที่มี Validation
         >
           <Ionicons name="search" size={20} color="#FFF" style={{marginRight: 10}} />
           <Text style={styles.searchBtnText}>ค้นหาเที่ยว</Text>
@@ -355,32 +446,112 @@ export default function BookTicketScreen() {
       </View>
 
       {/* ========================================================= */}
-      {/* 🔮 Modals ด้านล่าง */}
+      {/* 🔮 Modals */}
       {/* ========================================================= */}
 
-      {/* Modal ค้นหาสถานี (เหมือนเดิม) */}
       <Modal visible={activeModal === 'station'} animationType="slide">
-        <SafeAreaView style={{flex: 1, backgroundColor: '#FFF'}}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setActiveModal(null)}><Ionicons name="chevron-back" size={28} color="#333" /></TouchableOpacity>
-            <View style={styles.modalSearchBox}><Ionicons name="search" size={20} color="#9E9E9E" /><TextInput style={styles.modalSearchInput} placeholder="ค้นหาสถานี..." onChangeText={setSearchQuery} /></View>
+        <View style={styles.mainContainer}>
+          <View style={styles.stationModalHeaderBg}>
+            <View style={styles.headerGraphicCircle} />
+            <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
+              <View style={styles.headerTopRow}>
+                <TouchableOpacity onPress={() => {
+                  setActiveModal(null); 
+                  setSearchQuery('');
+                  setSelectedRegion('ทั้งหมด'); 
+                }} style={styles.backBtnCircle}>
+                  <Ionicons name="chevron-back" size={24} color="#FFF" />
+                </TouchableOpacity>
+                <Text style={styles.headerTitle}>เลือกสถานี</Text>
+                <View style={{width: 40}} />
+              </View>
+              
+              <View style={styles.stationModalSearchBox}>
+                <Ionicons name="search" size={20} color="#333" />
+                <TextInput 
+                  style={styles.modalSearchInput} 
+                  placeholder="ค้นหาสถานี..." 
+                  placeholderTextColor="#9E9E9E" 
+                  onChangeText={setSearchQuery} 
+                  value={searchQuery}
+                />
+              </View>
+            </SafeAreaView>
           </View>
-          <View style={styles.timelineWrapper}>
-            <View style={styles.blackLine} />
-            <FlatList data={stations.filter(s => s.station_name.includes(searchQuery))} keyExtractor={(item) => item.id.toString()} renderItem={({item}) => (
-              <TouchableOpacity style={styles.timelineItem} onPress={() => { if(selectingType==='origin') setOrigin(item.station_name); else setDestination(item.station_name); setActiveModal(null); }}>
-                <View style={styles.nodeWrapper}><View style={styles.nodeBox}><Ionicons name="train" size={16} color="#333" /></View><View style={styles.nodeLink} /></View>
-                <View style={{marginLeft: 25}}><Text style={{fontWeight: 'bold'}}>{item.station_name}</Text><Text style={{color: '#9E9E9E', fontSize: 12}}>{item.province}</Text></View>
-              </TouchableOpacity>
-            )} />
-          </View>
-        </SafeAreaView>
+
+          <ScrollView contentContainerStyle={styles.stationModalScroll} showsVerticalScrollIndicator={false}>
+            
+            <View style={{ marginBottom: 15 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {regionFilters.map((r) => (
+                  <TouchableOpacity 
+                    key={r.id} 
+                    style={[styles.regionFilterChip, selectedRegion === r.id && styles.regionFilterChipActive]}
+                    onPress={() => setSelectedRegion(r.id)}
+                  >
+                    <Text style={[styles.regionFilterText, selectedRegion === r.id && styles.regionFilterTextActive]}>{r.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {searchQuery === '' && selectedRegion === 'ทั้งหมด' && recentStations.length > 0 && (
+              <View style={styles.recentStationSection}>
+                <Text style={styles.sectionHeaderLabel}>เพิ่งค้นหา</Text>
+                {recentStations.map((item, index) => {
+                  const sStyle = getStationStyle(item);
+                  return (
+                    <TouchableOpacity key={`recent-${index}`} style={styles.recentStationItem} onPress={() => handleSelectStation(item)}>
+                      <View style={[styles.stationIconBox, { backgroundColor: sStyle.bg }]}>
+                        <Ionicons name="train" size={20} color={sStyle.iconColor} />
+                      </View>
+                      <View style={styles.stationTextWrapper}>
+                        <Text style={styles.stationNameText}>{item.station_name}</Text>
+                        <Text style={styles.stationSubText}>{item.province} {sStyle.badgeText ? `• ${sStyle.badgeText}` : ''}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  )
+                })}
+              </View>
+            )}
+
+            <Text style={[styles.sectionHeaderLabel, {marginTop: (searchQuery || selectedRegion !== 'ทั้งหมด') ? 0 : 10}]}>
+              {searchQuery || selectedRegion !== 'ทั้งหมด' ? 'ผลการค้นหา' : 'สถานีทั้งหมด'}
+            </Text>
+            
+            <View style={styles.allStationsCard}>
+              {filteredAllStations.map((item, index, arr) => {
+                const sStyle = getStationStyle(item);
+                const isLast = index === arr.length - 1;
+
+                return (
+                  <TouchableOpacity key={item.id} style={[styles.allStationItem, isLast && {borderBottomWidth: 0}]} onPress={() => handleSelectStation(item)}>
+                    <View style={[styles.stationIconBox, { backgroundColor: sStyle.bg }]}>
+                      <Ionicons name="train" size={20} color={sStyle.iconColor} />
+                    </View>
+                    <View style={styles.stationTextWrapper}>
+                      <Text style={styles.stationNameText}>{item.station_name}</Text>
+                      <Text style={styles.stationSubText}>{item.province} {sStyle.badgeText ? `• ${sStyle.badgeText}` : ''}</Text>
+                    </View>
+                    {sStyle.badgeText ? (
+                      <View style={[styles.lineBadge, {backgroundColor: sStyle.badgeBg}]}>
+                        <Text style={[styles.lineBadgeText, {color: sStyle.badgeTextColor}]}>{sStyle.badgeText}</Text>
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                )
+              })}
+              {filteredAllStations.length === 0 && (
+                <Text style={{textAlign: 'center', color: '#9E9E9E', marginVertical: 20}}>ไม่พบสถานีที่ค้นหา</Text>
+              )}
+            </View>
+
+          </ScrollView>
+        </View>
       </Modal>
 
-      {/* ✨ ใหม่! Modal ปฏิทินแบบคู่ (ไป-กลับ ในหน้าเดียว) */}
       <Modal visible={activeModal === 'calendar'} animationType="slide">
         <View style={styles.mainContainer}>
-          {/* Header สีน้ำเงินเข้ม */}
           <View style={styles.blueHeaderBg}>
             <View style={styles.headerGraphicCircle} />
             <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
@@ -394,18 +565,11 @@ export default function BookTicketScreen() {
             </SafeAreaView>
           </View>
 
-          <ScrollView 
-            contentContainerStyle={{padding: 20, paddingBottom: 100, marginTop: -30}} 
-            showsVerticalScrollIndicator={false}
-          >
-            {/* 📅 การ์ดปฏิทินขาไป */}
+          <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 100, marginTop: -30}} showsVerticalScrollIndicator={false}>
             {renderCalendarCard('dep')}
-
-            {/* 📅 การ์ดปฏิทินขากลับ (ถ้าเลือกเที่ยวเดียว การ์ดนี้จะจางและกดไม่ได้) */}
             {renderCalendarCard('ret')}
           </ScrollView>
 
-          {/* 🔘 ปุ่มยืนยันวันลอยด้านล่าง */}
           <View style={styles.bottomSearchContainer}>
             <TouchableOpacity style={styles.searchBtn} onPress={() => setActiveModal(null)}>
               <Ionicons name="checkmark" size={20} color="#FFF" style={{marginRight: 10}} />
@@ -415,7 +579,6 @@ export default function BookTicketScreen() {
         </View>
       </Modal>
 
-      {/* Modal ชั้นโดยสาร / ประเภทตู้ */}
       <Modal visible={activeModal === 'trainType' || activeModal === 'cabinClass'} transparent animationType="slide">
         <View style={styles.sheetOverlay}>
           <TouchableOpacity style={{flex:1}} onPress={() => setActiveModal(null)} />
@@ -458,7 +621,6 @@ export default function BookTicketScreen() {
         </View>
       </Modal>
 
-      {/* Modal เลขตู้ขบวน */}
       <Modal visible={activeModal === 'cabinNumber'} transparent animationType="slide">
         <View style={styles.sheetOverlay}>
           <TouchableOpacity style={{flex:1}} onPress={() => setActiveModal(null)} />
@@ -497,9 +659,8 @@ export default function BookTicketScreen() {
   );
 }
 
-// 📐 สไตล์ทั้งหมด
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F5F5F5' },
+  mainContainer: { flex: 1, backgroundColor: '#FAFAFA' },
   
   blueHeaderBg: { backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, paddingBottom: 50, overflow: 'hidden' },
   headerGraphicCircle: { position: 'absolute', right: -50, top: -50, width: 300, height: 300, borderRadius: 150, backgroundColor: '#2E3166' },
@@ -575,9 +736,6 @@ const styles = StyleSheet.create({
   radioCircleSelected: { borderColor: '#5E35B1' },
   radioDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#5E35B1' },
 
-  // ====================================
-  // ✨ สไตล์สำหรับ ปฏิทินแบบใหม่ (2 กล่อง)
-  // ====================================
   calendarCard: { backgroundColor: '#FFF', borderRadius: 25, padding: 25, marginBottom: 20, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, borderWidth: 1, borderColor: '#EEEEEE' },
   calendarHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   calendarMonthText: { fontSize: 18, fontWeight: 'bold', color: '#333' },
@@ -588,16 +746,32 @@ const styles = StyleSheet.create({
   daysGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   dayHead: { width: '14.28%', textAlign: 'center', color: '#757575', fontSize: 12, marginBottom: 10 },
   dayCell: { width: '14.28%', height: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 5 },
-  dayCellSelected: { backgroundColor: '#5E35B1', borderRadius: 15 }, // วงกลมเน้นวัน
+  dayCellSelected: { backgroundColor: '#5E35B1', borderRadius: 15 },
   dayText: { fontSize: 14, color: '#333', fontWeight: '500' },
 
-  modalHeader: { flexDirection: 'row', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
-  modalSearchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 20, paddingHorizontal: 15, height: 45, marginLeft: 10 },
-  modalSearchInput: { flex: 1, marginLeft: 10 },
-  timelineWrapper: { flex: 1, paddingLeft: 30 },
-  blackLine: { position: 'absolute', left: 45, top: 0, bottom: 0, width: 6, backgroundColor: '#000' },
-  timelineItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 30 },
-  nodeWrapper: { width: 40, alignItems: 'center' },
-  nodeBox: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#FFF', borderWidth: 2, borderColor: '#333', justifyContent: 'center', alignItems: 'center', zIndex: 1 },
-  nodeLink: { width: 15, height: 4, backgroundColor: '#000', position: 'absolute', right: -15 },
+  stationModalHeaderBg: { backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, paddingBottom: 30, overflow: 'hidden' },
+  stationModalSearchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 25, marginHorizontal: 20, paddingHorizontal: 15, height: 50, marginTop: 10 },
+  modalSearchInput: { flex: 1, marginLeft: 10, fontSize: 16, color: '#333' },
+  
+  stationModalScroll: { padding: 20, paddingBottom: 50 },
+  sectionHeaderLabel: { fontSize: 12, color: '#9E9E9E', marginBottom: 10, marginLeft: 5 },
+  
+  regionFilterChip: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F0F0F5', marginRight: 10, borderWidth: 1, borderColor: '#E0E0E0' },
+  regionFilterChipActive: { backgroundColor: '#262956', borderColor: '#262956' },
+  regionFilterText: { fontSize: 12, color: '#757575', fontWeight: 'bold' },
+  regionFilterTextActive: { color: '#FFF' },
+
+  recentStationSection: { marginBottom: 20 },
+  recentStationItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#EEEEEE' },
+  
+  allStationsCard: { backgroundColor: '#FFF', borderRadius: 25, padding: 10, borderWidth: 1, borderColor: '#EEEEEE', elevation: 1 },
+  allStationItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  
+  stationIconBox: { width: 45, height: 45, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+  stationTextWrapper: { flex: 1, justifyContent: 'center' },
+  stationNameText: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 3 },
+  stationSubText: { fontSize: 12, color: '#9E9E9E' },
+  
+  lineBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  lineBadgeText: { fontSize: 10, fontWeight: 'bold' }
 });

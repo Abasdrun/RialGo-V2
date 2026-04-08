@@ -1,414 +1,480 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, FlatList, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Modal, Dimensions, SafeAreaView as RNSafeAreaView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-// 🔴 Path supabase ดึงจากโฟลเดอร์นอกสุดเหมือนหน้า login
-import { supabase } from '../supabase'; 
+import { router, useLocalSearchParams } from 'expo-router';
+import { supabase } from '../supabase';
+
+const { width, height } = Dimensions.get('window');
+
+// โครงสร้างข้อมูลตั๋ว
+interface Ticket {
+  id: string;
+  refCode: string;
+  trainName: string;
+  origin: string;
+  dest: string;
+  depTime: string;
+  arrTime: string;
+  duration: string;
+  date: string;
+  seat: string;
+  cabin: string;
+  price: number;
+  status: 'upcoming' | 'completed' | 'cancelled';
+  countdown?: string;
+  classType: string;
+}
 
 export default function MyTicketScreen() {
+  const params = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState<'upcoming' | 'history'>('upcoming');
-  const [tickets, setTickets] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  
-  // 🟢 State สำหรับคุมการเปิด/ปิดหน้ารายละเอียดตั๋ว
-  const [selectedTicket, setSelectedTicket] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
   useEffect(() => {
     fetchMyTickets();
   }, []);
 
-  const fetchMyTickets = async () => {
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (user) {
-      const { data, error } = await supabase
-        .from('bookings')
-        .select(`
-          id,
-          total_price,
-          status,
-          created_at,
-          origin:origin_station_id(station_name),
-          destination:destination_station_id(station_name)
-        `)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (data) {
-        const formattedTickets = data.map((b, index) => {
-          const isUpcoming = index % 2 === 0; 
-          return {
-            id: b.id,
-            origin: b.origin?.station_name || 'สถานีกลางกรุงเทพอภิวัฒน์',
-            destination: b.destination?.station_name || 'สถานีชุมพร',
-            total_price: b.total_price || 2120,
-            status: isUpcoming ? 'upcoming' : 'history',
-            dateText: isUpcoming ? 'ส., 21 ก.พ. 2026' : 'ส., 07 มี.ค. 2026',
-            depTime: '06:00 น.',
-            arrTime: '12:30 น.',
-            duration: '6 ชั่วโมง 30 นาที',
-            trainInfo: 'ด่วนพิเศษ 7',
-            seatInfo: 'A1 - ตู้ 8',
-            countdownText: isUpcoming ? 'ออกใน 4 ชม.' : 'เดินทางแล้ว'
-          };
-        });
-        setTickets(formattedTickets);
-      }
-    }
-    setLoading(false);
+  // 🧮 ฟังก์ชันแยกเลขตู้ และเลขที่นั่ง (เช่น "1-12, 1-13" -> ตู้ 1, ที่นั่ง 12, 13)
+  const parseCabinAndSeats = (seatsStr: string) => {
+    if (!seatsStr || seatsStr === 'undefined') return { cabin: '-', seats: '-' };
+    const seatArr = seatsStr.split(',').map(s => s.trim());
+    const cabin = seatArr[0].split('-')[0] || '-';
+    const seats = seatArr.map(s => s.split('-')[1] || s).join(', ');
+    return { cabin, seats };
   };
 
-  const filteredTickets = tickets.filter(t => t.status === activeTab);
+  // 🧮 ฟังก์ชันคำนวณเวลาเดินทางจริง
+  const calculateRealDuration = (dep: string, arr: string) => {
+    if (!dep || !arr || dep === '00:00') return '--ชม. --น.';
+    const [dh, dm] = dep.split(':').map(Number);
+    const [ah, am] = arr.split(':').map(Number);
+    let mins = (ah * 60 + am) - (dh * 60 + dm);
+    if (mins < 0) mins += 24 * 60; // วิ่งข้ามคืน
+    return `${Math.floor(mins / 60)}ชม. ${mins % 60}น.`;
+  };
 
-  const renderTicketCard = ({ item }: { item: any }) => (
-    // 🔴 เปลี่ยนเป็น TouchableOpacity เพื่อกดดูรายละเอียด
-    <TouchableOpacity 
-      style={styles.ticketCard}
-      onPress={() => setSelectedTicket(item)}
-    >
-      <View style={styles.cardTop}>
-        <View style={styles.headerRow}>
-          <View style={styles.dateGroup}>
-            <Ionicons name="calendar-outline" size={16} color="#333" />
-            <Text style={styles.dateText}>{item.dateText} | {item.duration}</Text>
-          </View>
-          <View style={[styles.statusBadge, item.status === 'history' && styles.statusBadgeHistory]}>
-            <Text style={[styles.statusText, item.status === 'history' && styles.statusTextHistory]}>
-              {item.status === 'upcoming' ? 'ที่จะมาถึง' : 'เสร็จสิ้น'}
-            </Text>
-          </View>
-        </View>
-        <Text style={styles.trainInfoText}>{item.trainInfo}</Text>
+  // 🧮 ฟังก์ชันนับถอยหลังเวลาออกเดินทาง
+  const getCountdown = (depDate: string, depTime: string) => {
+    if (!depDate || !depTime || depTime === '00:00') return '';
+    const now = new Date();
+    const depDateTime = new Date(`${depDate}T${depTime}:00`);
+    const diffMs = depDateTime.getTime() - now.getTime();
+    
+    if (diffMs <= 0) return 'เดินทางแล้ว'; // ถ้ารถไฟออกไปแล้ว
+    
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffHrs = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    
+    if (diffDays > 0) return `ออกใน ${diffDays} วัน ${diffHrs} ชม.`;
+    if (diffHrs > 0) return `ออกใน ${diffHrs} ชม. ${diffMins} นาที`;
+    return `ออกใน ${diffMins} นาที`;
+  };
 
-        <View style={styles.routeContainer}>
-          <View style={styles.stationBlock}>
-            <Text style={styles.stationName}>{item.origin}</Text>
-            <Text style={styles.timeDetail}>{item.depTime}</Text>
-          </View>
+  const fetchMyTickets = async () => {
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // ดึงข้อมูลจริงจาก DB
+      if (user) {
+        const { data: bookings } = await supabase
+          .from('bookings')
+          .select(`
+            id, total_price, status, selected_seats, created_at, origin_station_id, destination_station_id,
+            trips ( train_id, departure_date, trains ( type, train_number ) ),
+            origin:origin_station_id ( station_name ),
+            dest:destination_station_id ( station_name )
+          `)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (bookings && bookings.length > 0) {
           
-          <View style={styles.arrowContainer}>
-            <View style={styles.arrowLine} />
-            <Ionicons name="caret-forward" size={12} color="#9E9E9E" style={styles.arrowHead} />
-          </View>
+          // 🚀 [ระบบใหม่] วิ่งไปดึงเวลาออก/ถึง จาก train_stops แบบเรียลไทม์
+          const formattedTickets = await Promise.all(bookings.map(async (b: any) => {
+            
+            let exactDep = '00:00';
+            let exactArr = '00:00';
+            
+            if (b.trips?.train_id && b.origin_station_id && b.destination_station_id) {
+               const { data: stops } = await supabase.from('train_stops')
+                  .select('station_id, departure_time, arrival_time')
+                  .eq('train_id', b.trips.train_id)
+                  .in('station_id', [b.origin_station_id, b.destination_station_id]);
+               
+               if (stops) {
+                  const originStop = stops.find(s => s.station_id === b.origin_station_id);
+                  const destStop = stops.find(s => s.station_id === b.destination_station_id);
+                  if (originStop?.departure_time) exactDep = originStop.departure_time.substring(0, 5);
+                  if (destStop?.arrival_time) exactArr = destStop.arrival_time.substring(0, 5);
+               }
+            }
 
-          <View style={styles.stationBlockRight}>
-            <Text style={styles.stationName}>{item.destination}</Text>
-            <Text style={styles.timeDetail}>{item.arrTime}</Text>
-          </View>
-        </View>
-      </View>
+            // แยกเลขตู้-ที่นั่ง
+            const { cabin, seats } = parseCabinAndSeats(b.selected_seats);
+            
+            // คำนวณเวลา และ นับถอยหลัง
+            const durationTxt = calculateRealDuration(exactDep, exactArr);
+            const countdownTxt = getCountdown(b.trips?.departure_date, exactDep);
 
-      <View style={styles.dashedDivider} />
+            // เช็คว่าเลยเวลาหรือยัง ถ้าเลยเวลาแล้วให้เปลี่ยนเป็น "เสร็จสิ้น" อัตโนมัติ
+            let currentStatus = b.status === 'Confirmed' ? 'upcoming' : (b.status === 'Cancelled' ? 'cancelled' : 'completed');
+            if (currentStatus === 'upcoming' && countdownTxt === 'เดินทางแล้ว') {
+                currentStatus = 'completed';
+            }
 
-      <View style={styles.cardBottom}>
-        <View style={styles.seatBadge}>
-          <Text style={styles.seatText}>{item.seatInfo}</Text>
-        </View>
-        
-        <View style={styles.countdownGroup}>
-          <Ionicons name={item.status === 'upcoming' ? "time-outline" : "checkmark-circle"} size={16} color={item.status === 'upcoming' ? "#FBC02D" : "#4CAF50"} />
-          <Text style={[styles.countdownText, item.status === 'history' && {color: '#4CAF50'}]}>
-             {item.countdownText}
-          </Text>
-        </View>
+            return {
+              id: b.id.toString(),
+              refCode: `TH ${new Date(b.created_at).getFullYear()}-${String(b.id).padStart(5, '0')}`,
+              trainName: `${b.trips?.trains?.type || 'รถด่วนพิเศษ'} ${b.trips?.trains?.train_number || ''}`,
+              origin: b.origin?.station_name || 'กรุงเทพ',
+              dest: b.dest?.station_name || 'เชียงใหม่',
+              depTime: exactDep,
+              arrTime: exactArr,
+              duration: durationTxt,
+              date: formatThaiDate(b.trips?.departure_date || new Date().toISOString()),
+              seat: seats,
+              cabin: cabin, 
+              price: b.total_price,
+              status: currentStatus,
+              countdown: countdownTxt,
+              classType: b.trips?.trains?.type === 'รถด่วนพิเศษ' ? 'ชั้น 2 ปรับอากาศ' : 'ชั้น 3 พัดลม'
+            };
+          }));
 
-        <Text style={styles.priceText}>THB {item.total_price.toLocaleString('en-US', {minimumFractionDigits: 2})}</Text>
-      </View>
-    </TouchableOpacity>
+          setTickets(formattedTickets);
+        } else {
+           // ถ้าไม่มีข้อมูล ให้เซ็ตเป็นหน้าว่างๆ
+           setTickets([]);
+        }
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatThaiDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+    return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear() + 543}`;
+  };
+
+  const filteredTickets = tickets.filter(t => 
+    activeTab === 'upcoming' ? t.status === 'upcoming' : t.status !== 'upcoming'
   );
 
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'upcoming': return <View style={[styles.statusBadge, {backgroundColor: '#F3E5F5'}]}><Text style={[styles.statusBadgeText, {color: '#8E24AA'}]}>ที่จะมาถึง</Text></View>;
+      case 'completed': return <View style={[styles.statusBadge, {backgroundColor: '#EEEEEE'}]}><Text style={[styles.statusBadgeText, {color: '#757575'}]}>เสร็จสิ้น</Text></View>;
+      case 'cancelled': return <View style={[styles.statusBadge, {backgroundColor: '#FFEBEE'}]}><Text style={[styles.statusBadgeText, {color: '#E53935'}]}>ยกเลิก</Text></View>;
+      default: return null;
+    }
+  };
+
+  const getStatusFooter = (ticket: Ticket) => {
+    switch (ticket.status) {
+      case 'upcoming': return <View style={styles.footerStatusBox}><Ionicons name="time-outline" size={14} color="#FBC02D" /><Text style={[styles.footerStatusText, {color: '#FBC02D'}]}> {ticket.countdown}</Text></View>;
+      case 'completed': return <View style={styles.footerStatusBox}><Ionicons name="checkmark" size={14} color="#4CAF50" /><Text style={[styles.footerStatusText, {color: '#4CAF50'}]}> เดินทางแล้ว</Text></View>;
+      case 'cancelled': return <View style={styles.footerStatusBox}><Ionicons name="close" size={14} color="#E53935" /><Text style={[styles.footerStatusText, {color: '#E53935'}]}> ถูกยกเลิก</Text></View>;
+      default: return null;
+    }
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.push('/')} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <View style={styles.titleBox}>
-          <MaterialCommunityIcons name="ticket-confirmation-outline" size={20} color="#333" />
-          <Text style={styles.titleText}>My Ticket</Text>
+    <View style={styles.container}>
+      
+      {/* 🌊 Header สีน้ำเงินเข้ม */}
+      <View style={styles.blueHeaderBg}>
+        <View style={styles.headerGraphicCircle} />
+      </View>
+
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity onPress={() => router.push('/')} style={styles.backBtnCircle}>
+            <Ionicons name="chevron-back" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>My Ticket</Text>
+          <View style={{width: 40}} />
         </View>
-        <View style={{width: 40}} />
-      </View>
 
-      <View style={styles.tabContainer}>
-        <TouchableOpacity 
-          style={[styles.tabButton, activeTab === 'upcoming' && styles.tabActive]}
-          onPress={() => setActiveTab('upcoming')}
-        >
-          <Text style={[styles.tabText, activeTab === 'upcoming' && styles.tabTextActive]}>ที่จะมาถึง</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.tabButton, activeTab === 'history' && styles.tabActive]}
-          onPress={() => setActiveTab('history')}
-        >
-          <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>ประวัติการเดินทาง</Text>
-        </TouchableOpacity>
-      </View>
+        {/* 🔘 Tabs (ที่จะมาถึง / ประวัติการเดินทาง) */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity style={[styles.tabBtn, activeTab === 'upcoming' && styles.tabBtnActive]} onPress={() => setActiveTab('upcoming')}>
+            <Text style={[styles.tabText, activeTab === 'upcoming' && styles.tabTextActive]}>ที่จะมาถึง</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.tabBtn, activeTab === 'history' && styles.tabBtnActive]} onPress={() => setActiveTab('history')}>
+            <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>ประวัติการเดินทาง</Text>
+          </TouchableOpacity>
+        </View>
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#1C1E36" style={{marginTop: 50}} />
-      ) : (
-        <FlatList
-          data={filteredTickets}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          renderItem={renderTicketCard}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="ticket-outline" size={60} color="#E0E0E0" />
-              <Text style={styles.emptyText}>ไม่มีข้อมูลตั๋วในหมวดหมู่นี้</Text>
-            </View>
-          }
-        />
-      )}
+        {loading ? (
+          <ActivityIndicator size="large" color="#5E35B1" style={{marginTop: 50}} />
+        ) : (
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {filteredTickets.map((ticket, index) => (
+              <TouchableOpacity key={index} style={styles.ticketCard} onPress={() => setSelectedTicket(ticket)} activeOpacity={0.8}>
+                
+                <View style={styles.cardHeader}>
+                  <View>
+                    <Text style={styles.trainNameText}>{ticket.trainName} • {ticket.dest}</Text>
+                    <Text style={styles.dateText}>{ticket.date}</Text>
+                  </View>
+                  {getStatusBadge(ticket.status)}
+                </View>
 
-      {/* 🚀 Modal หน้ารายละเอียดตั๋ว (Ticket Detail) */}
-      <Modal visible={!!selectedTicket} animationType="slide" onRequestClose={() => setSelectedTicket(null)}>
-        {selectedTicket && (
-          <SafeAreaView style={styles.detailContainer}>
-            {/* 🔝 Header */}
-            <View style={styles.detailHeader}>
-              <TouchableOpacity onPress={() => setSelectedTicket(null)} style={styles.detailBackBtn}>
-                <Ionicons name="chevron-back" size={24} color="#333" />
+                <View style={styles.routeRow}>
+                  <View style={{flex: 1}}><Text style={styles.cityText}>{ticket.origin}</Text><Text style={styles.timeText}>{ticket.depTime}</Text></View>
+                  <View style={styles.arrowContainer}>
+                    <Text style={styles.durationText}>{ticket.duration}</Text>
+                    <Ionicons name="arrow-forward" size={20} color="#BDBDBD" />
+                  </View>
+                  <View style={{flex: 1, alignItems: 'flex-end'}}><Text style={styles.cityText}>{ticket.dest}</Text><Text style={styles.timeText}>{ticket.arrTime}</Text></View>
+                </View>
+
+                <View style={styles.cardFooter}>
+                  <View style={styles.seatBadge}>
+                    <Text style={styles.seatBadgeText}>{ticket.seat} • ตู้ {ticket.cabin}</Text>
+                  </View>
+                  
+                  {getStatusFooter(ticket)}
+
+                  <Text style={styles.priceText}>THB {ticket.price.toLocaleString('en-US')}</Text>
+                </View>
+
+                {/* เส้นตกแต่งขอบซ้าย/ขวา */}
+                <View style={styles.cutoutLeft} />
+                <View style={styles.cutoutRight} />
               </TouchableOpacity>
-              <View style={styles.detailTitleBox}>
-                <MaterialCommunityIcons name="ticket-confirmation-outline" size={20} color="#333" />
-                <Text style={styles.detailTitleText}>Ticket Detail</Text>
+            ))}
+
+            {filteredTickets.length === 0 && (
+              <View style={styles.emptyState}>
+                <Ionicons name="ticket-outline" size={50} color="#BDBDBD" />
+                <Text style={styles.emptyText}>คุณยังไม่มีตั๋วในหมวดหมู่นี้</Text>
               </View>
+            )}
+          </ScrollView>
+        )}
+      </SafeAreaView>
+
+      {/* ========================================== */}
+      {/* 🔮 MODAL: รายละเอียดตั๋ว (หน้าต่างสีน้ำเงิน) */}
+      {/* ========================================== */}
+      <Modal visible={!!selectedTicket} animationType="slide" transparent>
+        <View style={styles.modalFullBg}>
+          <RNSafeAreaView style={{flex: 1}}>
+            <View style={styles.modalHeaderRow}>
+              <TouchableOpacity onPress={() => setSelectedTicket(null)} style={styles.backBtnCircle}>
+                <Ionicons name="chevron-back" size={24} color="#FFF" />
+              </TouchableOpacity>
+              <Text style={styles.headerTitle}>รายละเอียดตั๋ว</Text>
               <View style={{width: 40}} />
             </View>
 
-            <ScrollView contentContainerStyle={styles.detailScrollContent} showsVerticalScrollIndicator={false}>
-              {/* 🏷️ Status & ID */}
-              <View style={styles.statusRow}>
-                  <View style={[styles.statusBadgeDark, selectedTicket.status === 'history' && {backgroundColor: '#333'}]}>
-                      <View style={[styles.greenDot, selectedTicket.status === 'history' && {backgroundColor: '#9E9E9E'}]} />
-                      <Text style={[styles.statusTextDark, selectedTicket.status === 'history' && {color: '#9E9E9E'}]}>
-                        {selectedTicket.status === 'upcoming' ? 'ยืนยันแล้ว' : 'สิ้นสุดการเดินทาง'}
-                      </Text>
-                  </View>
-                  <Text style={styles.ticketIdText}>#TH-2026-{String(selectedTicket.id).substring(0,4).padStart(4, '0')}</Text>
-              </View>
+            {selectedTicket && (
+              <ScrollView contentContainerStyle={styles.modalScroll}>
+                
+                <View style={styles.modalTopInfo}>
+                  <View style={styles.confirmedBadge}><Text style={styles.confirmedText}>● ยืนยันแล้ว</Text></View>
+                  <Text style={styles.refText}>{selectedTicket.refCode}</Text>
+                </View>
 
-              {/* 🛤️ Route Info (Dark Area) */}
-              <View style={styles.routeHeader}>
-                  <View style={styles.routeCol}>
-                      <Text style={styles.routeStation}>{selectedTicket.origin}</Text>
-                      <Text style={styles.routeTime}>{selectedTicket.depTime}</Text>
+                <View style={styles.modalRouteRow}>
+                  <View><Text style={styles.modalCityText}>{selectedTicket.origin}</Text><Text style={styles.modalCodeText}>BKK - {selectedTicket.depTime}น.</Text></View>
+                  <View style={styles.modalArrowCol}>
+                    <Ionicons name="arrow-forward" size={24} color="#A8AACC" />
+                    <Text style={styles.modalDurationText}>{selectedTicket.duration}</Text>
                   </View>
-                  <View style={styles.routeArrow}>
-                      <Text style={styles.durationTextTop}>{selectedTicket.duration}</Text>
-                      <Ionicons name="arrow-forward" size={24} color="#7E57C2" />
-                  </View>
-                  <View style={[styles.routeCol, {alignItems: 'flex-end'}]}>
-                      <Text style={styles.routeStation}>{selectedTicket.destination}</Text>
-                      <Text style={styles.routeTime}>{selectedTicket.arrTime}</Text>
-                  </View>
-              </View>
+                  <View style={{alignItems: 'flex-end'}}><Text style={styles.modalCityText}>{selectedTicket.dest}</Text><Text style={styles.modalCodeText}>CMP - {selectedTicket.arrTime}น.</Text></View>
+                </View>
 
-              {/* 🎟️ White Ticket Card */}
-              <View style={styles.detailTicketCard}>
-                  {/* 3 Pills (Date, Seat, Cabin) */}
-                  <View style={styles.pillsRow}>
-                      <View style={styles.pillBox}>
-                          <Text style={styles.pillLabel}>วันที่</Text>
-                          <Text style={styles.pillValue}>{selectedTicket.dateText.split('|')[0].trim()}</Text>
-                          <View style={styles.pillDot} />
-                      </View>
-                      <View style={styles.pillBox}>
-                          <Text style={styles.pillLabel}>ที่นั่ง</Text>
-                          <Text style={styles.pillValue}>{String(selectedTicket.seatInfo).replace(' - ตู้ 8', '')}</Text>
-                          <View style={styles.pillDot} />
-                      </View>
-                      <View style={styles.pillBox}>
-                          <Text style={styles.pillLabel}>ตู้</Text>
-                          <Text style={styles.pillValue}>8</Text>
-                          <View style={styles.pillDot} />
-                      </View>
+                <View style={styles.modalWhiteCard}>
+                  
+                  <View style={styles.grid3Col}>
+                    <View style={styles.colItem}><Text style={styles.colLabel}>วันที่</Text><Text style={styles.colValue}>{selectedTicket.date}</Text></View>
+                    <View style={[styles.colItem, styles.colCenter]}><Text style={styles.colLabel}>ที่นั่ง</Text><Text style={styles.colValue}>{selectedTicket.seat}</Text></View>
+                    <View style={[styles.colItem, {alignItems: 'flex-end'}]}><Text style={styles.colLabel}>ตู้</Text><Text style={styles.colValue}>{selectedTicket.cabin}</Text></View>
                   </View>
 
-                  {/* Timeline */}
+                  <View style={styles.dividerDark} />
+
                   <View style={styles.timelineSection}>
-                      <View style={styles.timelineCol}>
-                          <Text style={styles.timeTextBold}>{selectedTicket.depTime}</Text>
-                          <Ionicons name="train" size={20} color="#1C1E36" style={{marginVertical: 15}} />
-                          <Text style={styles.timeTextBold}>{selectedTicket.arrTime}</Text>
+                    <View style={styles.timelineRow}>
+                      <Text style={styles.timelineTime}>{selectedTicket.depTime}</Text>
+                      <View style={styles.timelineLineGroup}>
+                        <View style={styles.dotOutline} />
+                        <View style={styles.lineDashed} />
                       </View>
-                      <View style={styles.timelineLine}>
-                          <View style={styles.dotFilledDetail} />
-                          <View style={styles.verticalLineDetail} />
-                          <View style={styles.dotOutlineDetail} />
+                      <View style={styles.timelineContent}>
+                        <Text style={styles.timelineCity}>สถานี{selectedTicket.origin}</Text>
+                        <Text style={styles.timelineSub}>จุดขึ้นรถไฟของคุณ</Text>
+                        <View style={styles.travelTimeBadge}>
+                          <Ionicons name="time-outline" size={12} color="#A8AACC" />
+                          <Text style={styles.travelTimeText}> {selectedTicket.countdown}</Text>
+                        </View>
                       </View>
-                      <View style={styles.stationCol}>
-                          <Text style={styles.stationTextBold}>{selectedTicket.origin}</Text>
-                          <View style={styles.waitingInfo}>
-                              <Ionicons name={selectedTicket.status === 'upcoming' ? "time-outline" : "checkmark-circle"} size={14} color={selectedTicket.status === 'upcoming' ? "#FBC02D" : "#4CAF50"} />
-                              <Text style={[styles.waitingText, selectedTicket.status === 'history' && {color: '#4CAF50'}]}> {selectedTicket.countdownText}</Text>
-                          </View>
-                          <Text style={styles.stationTextBold}>{selectedTicket.destination}</Text>
-                      </View>
-                  </View>
-
-                  <View style={styles.dashedDividerDetail} />
-
-                  {/* 4 Grid Info Boxes */}
-                  <View style={styles.gridInfoRow}>
-                      <View style={styles.gridInfoBox}>
-                          <MaterialCommunityIcons name="view-grid-outline" size={20} color="#7E57C2" />
-                          <View style={styles.gridTextWrap}>
-                              <Text style={styles.gridLabel}>ประเภท</Text>
-                              <Text style={styles.gridValue}>ชั้น 2 ปรับอากาศ</Text>
-                          </View>
-                      </View>
-                      <View style={styles.gridInfoBox}>
-                          <Ionicons name="location-outline" size={20} color="#4CAF50" />
-                          <View style={styles.gridTextWrap}>
-                              <Text style={styles.gridLabel}>ขบวน</Text>
-                              <Text style={styles.gridValue}>{selectedTicket.trainInfo}</Text>
-                          </View>
-                      </View>
-                  </View>
-                  <View style={styles.gridInfoRow}>
-                      <View style={styles.gridInfoBox}>
-                          <MaterialCommunityIcons name="currency-usd-circle-outline" size={20} color="#FBC02D" />
-                          <View style={styles.gridTextWrap}>
-                              <Text style={styles.gridLabel}>ราคา</Text>
-                              <Text style={styles.gridValue}>THB {selectedTicket.total_price.toLocaleString('en-US', {minimumFractionDigits: 2})}</Text>
-                          </View>
-                      </View>
-                      <View style={styles.gridInfoBox}>
-                          <Ionicons name="train-outline" size={20} color="#7E57C2" />
-                          <View style={styles.gridTextWrap}>
-                              <Text style={styles.gridLabel}>สถานีต้นทาง</Text>
-                              <Text style={styles.gridValue} numberOfLines={1}>{selectedTicket.origin}</Text>
-                          </View>
-                      </View>
-                  </View>
-              </View>
-            </ScrollView>
-
-            {/* 🟡 Bottom Yellow Countdown Banner */}
-            <View style={[styles.bottomBanner, selectedTicket.status === 'history' && {borderColor: '#4CAF50'}]}>
-                <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                    <Ionicons name={selectedTicket.status === 'upcoming' ? "time" : "checkmark-circle"} size={28} color={selectedTicket.status === 'upcoming' ? "#FBC02D" : "#4CAF50"} />
-                    <View style={{marginLeft: 10}}>
-                        <Text style={[styles.bannerSubText, selectedTicket.status === 'history' && {color: '#4CAF50'}]}>
-                          {selectedTicket.status === 'upcoming' ? 'ออกเดินทางใน' : 'สถานะ'}
-                        </Text>
-                        <Text style={[styles.bannerMainText, selectedTicket.status === 'history' && {color: '#4CAF50'}]}>
-                          {selectedTicket.status === 'upcoming' ? '4 ชม. 22 นาที' : 'เดินทางสำเร็จ'}
-                        </Text>
                     </View>
+
+                    <View style={styles.timelineRow}>
+                      <Text style={styles.timelineTime}>{selectedTicket.arrTime}</Text>
+                      <View style={styles.timelineLineGroup}>
+                        <View style={styles.dotFilled} />
+                      </View>
+                      <View style={styles.timelineContent}>
+                        <Text style={styles.timelineCity}>สถานี{selectedTicket.dest}</Text>
+                        <Text style={styles.timelineSub}>จุดหมายปลายทาง</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.dividerDark} />
+
+                  <View style={styles.grid2x2}>
+                    <View style={styles.boxItem}>
+                      <View style={[styles.boxIcon, {backgroundColor: 'rgba(94,53,177,0.2)'}]}><MaterialCommunityIcons name="view-grid" size={18} color="#9575CD" /></View>
+                      <View><Text style={styles.boxLabel}>ประเภท</Text><Text style={styles.boxValue}>{selectedTicket.classType}</Text></View>
+                    </View>
+                    <View style={styles.boxItem}>
+                      <View style={[styles.boxIcon, {backgroundColor: 'rgba(76,175,80,0.2)'}]}><Ionicons name="location" size={18} color="#4CAF50" /></View>
+                      <View><Text style={styles.boxLabel}>ขบวน</Text><Text style={styles.boxValue}>{selectedTicket.trainName}</Text></View>
+                    </View>
+                    <View style={styles.boxItem}>
+                      <View style={[styles.boxIcon, {backgroundColor: 'rgba(251,192,45,0.2)'}]}><Ionicons name="sync" size={18} color="#FBC02D" /></View>
+                      <View><Text style={styles.boxLabel}>ราคา</Text><Text style={styles.boxValue}>THB {selectedTicket.price.toLocaleString()}</Text></View>
+                    </View>
+                    <View style={styles.boxItem}>
+                      <View style={[styles.boxIcon, {backgroundColor: 'rgba(156,39,176,0.2)'}]}><Ionicons name="train" size={18} color="#BA68C8" /></View>
+                      <View><Text style={styles.boxLabel}>สถานี</Text><Text style={styles.boxValue} numberOfLines={1}>สถานี{selectedTicket.dest}</Text></View>
+                    </View>
+                  </View>
+
                 </View>
-                <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                    <Text style={styles.bannerDateText}>{selectedTicket.dateText.substring(0, 10)}</Text>
-                </View>
-            </View>
-          </SafeAreaView>
-        )}
+
+                {/* 🟡 แถบเตือนเวลาสีเหลือง */}
+                {selectedTicket.status === 'upcoming' && (
+                  <View style={styles.yellowWarningBanner}>
+                    <Ionicons name="time-outline" size={24} color="#333" />
+                    <View style={{flex: 1, marginLeft: 15}}>
+                      <Text style={styles.warningLabel}>ออกเดินทางใน</Text>
+                      <Text style={styles.warningTime}>{selectedTicket.countdown.replace('ออกใน ', '')}</Text>
+                    </View>
+                    <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                      <Text style={styles.warningDate}>{selectedTicket.date.split(' ')[0]} {selectedTicket.date.split(' ')[1]}</Text>
+                      <Ionicons name="chevron-forward" size={16} color="#333" style={{marginLeft: 5}} />
+                    </View>
+                  </View>
+                )}
+
+              </ScrollView>
+            )}
+          </RNSafeAreaView>
+        </View>
       </Modal>
-    </SafeAreaView>
+
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  // ===================== 
-  // STYLES ของหน้าตั๋วรวม
-  // ===================== 
-  container: { flex: 1, backgroundColor: '#FAFAFA' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
-  titleBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 25, height: 45, marginHorizontal: 15, paddingHorizontal: 15, elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
-  titleText: { marginLeft: 10, fontSize: 16, fontWeight: 'bold', color: '#333' },
-  tabContainer: { flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 30, marginHorizontal: 20, padding: 5, elevation: 2, borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 20 },
-  tabButton: { flex: 1, height: 45, justifyContent: 'center', alignItems: 'center', borderRadius: 25 },
-  tabActive: { backgroundColor: '#1C1E36' },
-  tabText: { fontSize: 14, fontWeight: 'bold', color: '#9E9E9E' },
-  tabTextActive: { color: '#FFF' },
-  listContent: { paddingHorizontal: 20, paddingBottom: 50 },
-  ticketCard: { backgroundColor: '#E2DFEC', borderRadius: 20, marginBottom: 20, overflow: 'hidden' },
-  cardTop: { padding: 20, paddingBottom: 15 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
-  dateGroup: { flexDirection: 'row', alignItems: 'center' },
-  dateText: { fontSize: 12, fontWeight: 'bold', color: '#333', marginLeft: 5 },
-  statusBadge: { backgroundColor: '#D1C4E9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-  statusBadgeHistory: { backgroundColor: '#E0E0E0' },
-  statusText: { fontSize: 10, fontWeight: 'bold', color: '#5E35B1' },
-  statusTextHistory: { color: '#757575' },
-  trainInfoText: { fontSize: 11, color: '#757575', marginBottom: 20 },
-  routeContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  stationBlock: { flex: 1, alignItems: 'flex-start' },
-  stationBlockRight: { flex: 1, alignItems: 'flex-end' },
-  stationName: { fontSize: 13, fontWeight: 'bold', color: '#333' },
-  timeDetail: { fontSize: 11, color: '#757575', marginTop: 2 },
-  arrowContainer: { width: 80, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
-  arrowLine: { flex: 1, height: 1, backgroundColor: '#9E9E9E' },
-  arrowHead: { marginLeft: -3 },
-  dashedDivider: { height: 1, width: '100%', borderWidth: 1, borderStyle: 'dashed', borderColor: '#BDBDBD', borderRadius: 1 },
-  cardBottom: { padding: 20, paddingTop: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  seatBadge: { backgroundColor: '#FFF', paddingHorizontal: 15, paddingVertical: 6, borderRadius: 15 },
-  seatText: { fontSize: 12, fontWeight: 'bold', color: '#5E35B1' },
-  countdownGroup: { flexDirection: 'row', alignItems: 'center' },
-  countdownText: { fontSize: 12, fontWeight: 'bold', color: '#FBC02D', marginLeft: 5 },
-  priceText: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  emptyContainer: { alignItems: 'center', marginTop: 50 },
-  emptyText: { color: '#9E9E9E', marginTop: 10, fontSize: 16 },
-
-  // ===================== 
-  // STYLES ของหน้า Modal (Ticket Detail)
-  // ===================== 
-  detailContainer: { flex: 1, backgroundColor: '#0B0C1A' },
-  detailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
-  detailBackBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center' },
-  detailTitleBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 25, height: 45, marginHorizontal: 15, paddingHorizontal: 15 },
-  detailTitleText: { marginLeft: 10, fontSize: 14, fontWeight: 'bold', color: '#333' },
-  detailScrollContent: { padding: 20, paddingBottom: 100 },
+  container: { flex: 1, backgroundColor: '#F5F5F5' },
+  safeArea: { flex: 1, zIndex: 10 },
   
-  statusRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  statusBadgeDark: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C2924', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15 },
-  greenDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#4CAF50', marginRight: 5 },
-  statusTextDark: { color: '#4CAF50', fontSize: 10, fontWeight: 'bold' },
-  ticketIdText: { color: '#AAA', fontSize: 10, marginLeft: 15 },
+  blueHeaderBg: { position: 'absolute', top: 0, left: 0, right: 0, height: 260, backgroundColor: '#2E3165', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, zIndex: 0 },
+  headerGraphicCircle: { position: 'absolute', right: -50, top: -50, width: 300, height: 300, borderRadius: 150, backgroundColor: 'rgba(255,255,255,0.05)' },
+  
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10 },
+  backBtnCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
 
-  routeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  routeCol: { flex: 1 },
-  routeStation: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  routeTime: { color: '#AAA', fontSize: 12, marginTop: 5 },
-  routeArrow: { alignItems: 'center', paddingHorizontal: 10 },
-  durationTextTop: { color: '#7E57C2', fontSize: 10, fontWeight: 'bold', marginBottom: 2 },
+  tabContainer: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 30, marginHorizontal: 20, marginTop: 25, padding: 5 },
+  tabBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 25 },
+  tabBtnActive: { backgroundColor: '#FFF', elevation: 2 },
+  tabText: { color: '#D1C4E9', fontWeight: 'bold', fontSize: 14 },
+  tabTextActive: { color: '#262956' },
 
-  detailTicketCard: { backgroundColor: '#F0F0F5', borderRadius: 30, padding: 20 },
-  pillsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -35 },
-  pillBox: { width: '31%', backgroundColor: '#13142B', borderRadius: 20, paddingVertical: 15, alignItems: 'center', position: 'relative' },
-  pillLabel: { color: '#AAA', fontSize: 10, marginBottom: 5 },
-  pillValue: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
-  pillDot: { position: 'absolute', top: 8, left: 10, width: 4, height: 4, borderRadius: 2, backgroundColor: '#7E57C2' },
+  scrollContent: { padding: 20, paddingTop: 20, paddingBottom: 50 },
+  
+  ticketCard: { backgroundColor: '#FFF', borderRadius: 20, padding: 20, marginBottom: 15, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 5 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
+  trainNameText: { fontSize: 14, fontWeight: 'bold', color: '#333' },
+  dateText: { fontSize: 12, color: '#9E9E9E', marginTop: 2 },
+  statusBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  statusBadgeText: { fontSize: 10, fontWeight: 'bold' },
 
-  timelineSection: { flexDirection: 'row', marginTop: 30, marginBottom: 20 },
-  timelineCol: { justifyContent: 'space-between', alignItems: 'center', width: 45 },
-  timeTextBold: { fontSize: 12, fontWeight: 'bold', color: '#13142B' },
-  timelineLine: { width: 20, alignItems: 'center', paddingVertical: 5 },
-  dotFilledDetail: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#13142B' },
-  verticalLineDetail: { flex: 1, width: 2, backgroundColor: '#13142B', marginVertical: 2 },
-  dotOutlineDetail: { width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderColor: '#13142B', backgroundColor: '#F0F0F5' },
-  stationTextBold: { fontSize: 14, fontWeight: 'bold', color: '#13142B' },
-  waitingInfo: { flexDirection: 'row', alignItems: 'center' },
-  waitingText: { color: '#FBC02D', fontSize: 12, fontWeight: 'bold' },
+  routeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', borderStyle: 'dashed' },
+  cityText: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+  timeText: { fontSize: 12, color: '#9E9E9E', marginTop: 2 },
+  arrowContainer: { alignItems: 'center', flex: 1 },
+  durationText: { fontSize: 10, color: '#BDBDBD', marginBottom: 2 },
 
-  dashedDividerDetail: { height: 1, width: '100%', borderWidth: 1, borderStyle: 'dashed', borderColor: '#BDBDBD', borderRadius: 1, marginVertical: 20 },
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 15 },
+  seatBadge: { backgroundColor: '#EBE4FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
+  seatBadgeText: { color: '#5E35B1', fontSize: 12, fontWeight: 'bold' },
+  footerStatusBox: { flexDirection: 'row', alignItems: 'center' },
+  footerStatusText: { fontSize: 12, fontWeight: 'bold' },
+  priceText: { fontSize: 14, fontWeight: 'bold', color: '#333' },
 
-  gridInfoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  gridInfoBox: { width: '48%', backgroundColor: '#13142B', borderRadius: 20, padding: 15, flexDirection: 'row', alignItems: 'center', overflow: 'hidden' },
-  gridTextWrap: { marginLeft: 10, flex: 1 },
-  gridLabel: { color: '#AAA', fontSize: 10, marginBottom: 2 },
-  gridValue: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+  cutoutLeft: { position: 'absolute', top: 85, left: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: '#F5F5F5' },
+  cutoutRight: { position: 'absolute', top: 85, right: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: '#F5F5F5' },
 
-  bottomBanner: { position: 'absolute', bottom: 20, left: 20, right: 20, backgroundColor: '#1C1514', borderRadius: 20, padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#332927' },
-  bannerSubText: { color: '#FBC02D', fontSize: 10 },
-  bannerMainText: { color: '#FBC02D', fontSize: 18, fontWeight: 'bold' },
-  bannerDateText: { color: '#AAA', fontSize: 12, marginRight: 5 }
+  emptyState: { alignItems: 'center', marginTop: 80 },
+  emptyText: { color: '#9E9E9E', marginTop: 15, fontSize: 16 },
+
+  // ===================================
+  // สไตล์สำหรับหน้าต่างรายละเอียดตั๋ว (Modal)
+  // ===================================
+  modalFullBg: { flex: 1, backgroundColor: '#262956' }, // สีน้ำเงินเข้มเต็มจอ
+  modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 },
+  modalScroll: { paddingHorizontal: 20, paddingBottom: 50 },
+  
+  modalTopInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 25 },
+  confirmedBadge: { backgroundColor: '#E8F5E9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginRight: 15 },
+  confirmedText: { color: '#4CAF50', fontSize: 10, fontWeight: 'bold' },
+  refText: { color: '#A8AACC', fontSize: 12 },
+
+  modalRouteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
+  modalCityText: { fontSize: 22, fontWeight: 'bold', color: '#FFF' },
+  modalCodeText: { fontSize: 11, color: '#A8AACC', marginTop: 4 },
+  modalArrowCol: { alignItems: 'center' },
+  modalDurationText: { fontSize: 10, color: '#A8AACC', marginTop: 5 },
+
+  modalWhiteCard: { backgroundColor: '#1E2046', borderRadius: 25, padding: 20, borderWidth: 1, borderColor: '#3A3C59' },
+  grid3Col: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  colItem: { flex: 1 },
+  colCenter: { alignItems: 'center', borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#3A3C59' },
+  colLabel: { fontSize: 11, color: '#A8AACC', marginBottom: 5 },
+  colValue: { fontSize: 14, fontWeight: 'bold', color: '#FFF' },
+
+  dividerDark: { height: 1, backgroundColor: '#3A3C59', marginVertical: 20 },
+
+  timelineSection: { paddingLeft: 10 },
+  timelineRow: { flexDirection: 'row', marginBottom: 25 },
+  timelineTime: { color: '#FFF', fontSize: 14, fontWeight: 'bold', width: 45, marginTop: -2 },
+  timelineLineGroup: { width: 30, alignItems: 'center', marginRight: 10 },
+  dotOutline: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: '#A8AACC', backgroundColor: '#1E2046' },
+  dotFilled: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FFF' },
+  lineDashed: { width: 2, height: 50, backgroundColor: '#A8AACC', marginVertical: 2, borderStyle: 'dashed' },
+  timelineContent: { flex: 1 },
+  timelineCity: { color: '#FFF', fontSize: 14, fontWeight: 'bold', marginBottom: 3 },
+  timelineSub: { color: '#A8AACC', fontSize: 12, marginBottom: 8 },
+  travelTimeBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#262956', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15, alignSelf: 'flex-start' },
+  travelTimeText: { color: '#A8AACC', fontSize: 10 },
+
+  grid2x2: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  boxItem: { width: '48%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#262956', padding: 12, borderRadius: 15, marginBottom: 10 },
+  boxIcon: { width: 32, height: 32, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  boxLabel: { fontSize: 10, color: '#A8AACC' },
+  boxValue: { fontSize: 12, fontWeight: 'bold', color: '#FFF', marginTop: 2 },
+
+  yellowWarningBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FCE4EC', padding: 20, borderRadius: 20, marginTop: 25, backgroundColor: '#FDE047' },
+  warningLabel: { fontSize: 10, color: '#333' },
+  warningTime: { fontSize: 16, fontWeight: 'bold', color: '#333', marginTop: 2 },
+  warningDate: { fontSize: 12, fontWeight: 'bold', color: '#333' },
 });

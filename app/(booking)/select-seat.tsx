@@ -9,33 +9,60 @@ const { width } = Dimensions.get('window');
 
 export default function SelectSeatScreen() {
   const params = useLocalSearchParams();
-  const { origin, destination, departureDate, trainType, cabinClass, cabinNumber: initialCabin, adults, children, infants, depTime, arrTime, duration } = params;
+  const { origin, destination, departureDate, trainType, cabinClass, cabinNumber: initialCabin, adults, children, infants, depTime, arrTime, duration, trip_id } = params;
 
   const totalPax = Number(adults) + Number(children); 
-  const [selectedSeats, setSelectedSeats] = useState<number[]>([]);
+  
+  // 🚀 [อัปเกรด] เปลี่ยนมาเก็บข้อมูลแบบ "ตู้-ที่นั่ง" (เช่น '1-12')
+  const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
+  const [bookedSeats, setBookedSeats] = useState<string[]>([]); // เก็บที่นั่งที่โดนซื้อไปแล้วจาก DB
+  
   const [distance, setDistance] = useState(0);
   const [loading, setLoading] = useState(true);
-
   const [currentCabinNum, setCurrentCabinNum] = useState(String(initialCabin));
 
-  // 🎨 เอาที่นั่งผู้สูงอายุสีม่วงออกตามสั่ง เหลือแค่ที่นั่งไม่ว่าง (สีเทา)
-  const mockedBookedSeats = [21, 22, 43, 44]; 
-  const totalSeatsInCabin = 48;
-  const availableSeatsCount = totalSeatsInCabin - mockedBookedSeats.length - selectedSeats.length;
-
   useEffect(() => {
-    getDistance();
+    fetchInitialData();
   }, []);
 
-  const getDistance = async () => {
-    const { data } = await supabase.from('stations').select('km').in('station_name', [origin, destination]);
-    if (data && data.length === 2) {
-      setDistance(Math.abs(data[0].km - data[1].km));
+  const fetchInitialData = async () => {
+    setLoading(true);
+    
+    // 1. ดึงระยะทางเพื่อใช้คำนวณราคา
+    const { data: stData } = await supabase.from('stations').select('km').in('station_name', [String(origin), String(destination)]);
+    if (stData && stData.length === 2) {
+      setDistance(Math.abs(stData[0].km - stData[1].km));
     }
+
+    // 2. 🚀 [ระบบใหม่] ดึงที่นั่งที่ถูกจองแล้วจากตาราง bookings ของรอบรถนี้ (trip_id)
+    if (trip_id) {
+      const { data: bookingsData } = await supabase.from('bookings').select('selected_seats').eq('trip_id', trip_id);
+      
+      if (bookingsData) {
+        let allBooked: string[] = [];
+        bookingsData.forEach(booking => {
+          if (booking.selected_seats) {
+            // แยก string "1-12, 1-13" ออกมาเป็น Array
+            const seats = booking.selected_seats.split(',').map((s: string) => s.trim());
+            seats.forEach((s: string) => {
+              // ดักเคสข้อมูลเก่าที่อาจมีแค่ตัวเลข ให้ถือว่าเป็นตู้ 1
+              if (s.includes('-')) allBooked.push(s);
+              else allBooked.push(`1-${s}`); 
+            });
+          }
+        });
+        setBookedSeats(allBooked);
+      }
+    }
+    
     setLoading(false);
   };
 
-  const calculateSeatPrice = (seatNum: number) => {
+  // 🚀 [อัปเกรด] ระบบคำนวณราคาเตียงบน-ล่างแบบเป๊ะๆ
+  const calculateSeatPrice = (seatId: string) => {
+    const [cabin, seatNumStr] = seatId.split('-');
+    const seatNum = Number(seatNumStr);
+    
     let baseRate = 0;
     let serviceFee = trainType === 'รถด่วนพิเศษ' ? 190 : 50;
     let acFee = String(cabinClass).includes('ปรับอากาศ') ? 150 : 0;
@@ -47,8 +74,9 @@ export default function SelectSeatScreen() {
 
     const baseFare = distance * baseRate;
 
+    // ระบบเตียงนอน: เลขคี่ = เตียงล่าง (แพงกว่า), เลขคู่ = เตียงบน (ถูกกว่า)
     if (String(cabinClass).includes('ตู้นอน')) {
-        berthFee = (seatNum % 2 === 0) ? 500 : 300; 
+        berthFee = (seatNum % 2 !== 0) ? 500 : 300; 
     }
 
     return baseFare + serviceFee + acFee + berthFee;
@@ -57,8 +85,9 @@ export default function SelectSeatScreen() {
   const getTotalPrice = () => {
     if (selectedSeats.length === 0) return 0;
     let total = 0;
-    selectedSeats.forEach((seat, index) => {
-        const seatPrice = calculateSeatPrice(seat);
+    selectedSeats.forEach((seatId, index) => {
+        const seatPrice = calculateSeatPrice(seatId);
+        // ให้ส่วนลดเด็ก (สมมติว่าคนที่เลือกทีหลังผู้ใหญ่คือเด็ก)
         if (index >= Number(adults)) {
             total += (seatPrice * 0.7); 
         } else {
@@ -69,16 +98,20 @@ export default function SelectSeatScreen() {
   };
 
   const handleSelectSeat = (num: number) => {
-    // 🛡️ ดักไว้ไม่ให้กดที่นั่งที่ไม่ว่าง (สีเทา)
-    if (mockedBookedSeats.includes(num)) return; 
+    const seatId = `${currentCabinNum}-${num}`;
 
-    if (selectedSeats.includes(num)) {
-      setSelectedSeats(selectedSeats.filter(s => s !== num));
+    // 🛡️ ดักไว้ไม่ให้กดที่นั่งที่ไม่ว่าง (เช็คจาก DB)
+    if (bookedSeats.includes(seatId)) return; 
+
+    if (selectedSeats.includes(seatId)) {
+      // กรณีกดซ้ำเพื่อยกเลิก
+      setSelectedSeats(selectedSeats.filter(s => s !== seatId));
     } else {
+      // กรณีจองเพิ่ม (ห้ามเกินโควต้าจำนวนคน)
       if (selectedSeats.length < totalPax) {
-        setSelectedSeats([...selectedSeats, num]);
+        setSelectedSeats([...selectedSeats, seatId]);
       } else {
-        alert(`คุณเลือกที่นั่งครบตามจำนวนผู้โดยสาร (${totalPax} ท่าน) แล้ว`);
+        alert(`คุณเลือกที่นั่งครบตามจำนวนผู้โดยสาร (${totalPax} ท่าน) แล้วครับ`);
       }
     }
   };
@@ -96,8 +129,9 @@ export default function SelectSeatScreen() {
   };
 
   const renderSeat = (num: number) => {
-    const isSelected = selectedSeats.includes(num);
-    const isBooked = mockedBookedSeats.includes(num);
+    const seatId = `${currentCabinNum}-${num}`;
+    const isSelected = selectedSeats.includes(seatId);
+    const isBooked = bookedSeats.includes(seatId);
 
     let bgColor = '#FFF';
     let textColor = '#333';
@@ -117,13 +151,18 @@ export default function SelectSeatScreen() {
   };
 
   const isSleeper = String(cabinClass).includes('ตู้นอน');
+  
+  // คำนวณที่นั่งว่างเฉพาะ "ตู้ปัจจุบัน"
+  const totalSeatsInCabin = 48;
+  const bookedInThisCabin = bookedSeats.filter(s => s.startsWith(`${currentCabinNum}-`)).length;
+  const selectedInThisCabin = selectedSeats.filter(s => s.startsWith(`${currentCabinNum}-`)).length;
+  const availableSeatsCount = totalSeatsInCabin - bookedInThisCabin - selectedInThisCabin;
 
   if (loading) return <View style={styles.loadingArea}><ActivityIndicator size="large" color="#5E35B1" /></View>;
 
   return (
     <SafeAreaView style={styles.container}>
       
-      {/* 🌊 Header สีน้ำเงินเข้มขอบโค้งมน */}
       <View style={styles.blueHeaderBg}>
         <View style={styles.headerTopRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}>
@@ -133,7 +172,6 @@ export default function SelectSeatScreen() {
           <View style={{width: 40}} />
         </View>
 
-        {/* 📊 Info Boxes 3 กล่อง */}
         <View style={styles.infoBoxesRow}>
           <View style={styles.infoBox}>
             <Text style={styles.infoLabel}>ขบวน</Text>
@@ -144,7 +182,7 @@ export default function SelectSeatScreen() {
             <Text style={styles.infoValue}>ตู้ {currentCabinNum}</Text>
           </View>
           <View style={styles.infoBox}>
-            <Text style={styles.infoLabel}>ที่นั่งว่าง</Text>
+            <Text style={styles.infoLabel}>ที่นั่งว่าง (ตู้นี้)</Text>
             <Text style={styles.infoValueGreen}>{availableSeatsCount}</Text>
           </View>
         </View>
@@ -152,7 +190,6 @@ export default function SelectSeatScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {/* 🗂️ แถบเลือกตู้ขบวนแนวนอน */}
         <View style={styles.cabinTabsWrapper}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {getNumberOptions().map(num => (
@@ -168,14 +205,12 @@ export default function SelectSeatScreen() {
           </ScrollView>
         </View>
 
-        {/* 🏷️ Legend อธิบายสีที่นั่ง (เอาสีม่วงออก) */}
         <View style={styles.legendRow}>
           <View style={styles.legendItem}><View style={[styles.legendBox, {backgroundColor: '#FFF', borderWidth: 1, borderColor: '#DDD'}]} /><Text style={styles.legendText}>ว่าง</Text></View>
           <View style={styles.legendItem}><View style={[styles.legendBox, {backgroundColor: '#4CAF50'}]} /><Text style={styles.legendText}>เลือกแล้ว</Text></View>
           <View style={styles.legendItem}><View style={[styles.legendBox, {backgroundColor: '#757575'}]} /><Text style={styles.legendText}>ไม่ว่าง</Text></View>
         </View>
 
-        {/* 💺 ผังที่นั่งการ์ดสีน้ำเงินเข้ม */}
         <View style={styles.seatGridContainer}>
           <Text style={styles.cabinTitleText}>{cabinClass}</Text>
 
@@ -186,7 +221,7 @@ export default function SelectSeatScreen() {
           <View style={styles.mainGridRow}>
             {/* ⬅️ ฝั่งซ้าย */}
             <View style={styles.seatCol}>
-              {/* 🚀 ย้าย "ชั้นล่าง ชั้นบน" มาตรงกับหัวที่นั่งเป๊ะๆ */}
+              {/* 🚀 แก้หัวแถวให้ตรงตามลอจิก (คี่=ล่าง, คู่=บน) */}
               {isSleeper && (
                 <View style={styles.seatPairRowHeader}>
                   <Text style={styles.colHeaderText}>ชั้นล่าง</Text>
@@ -201,18 +236,18 @@ export default function SelectSeatScreen() {
               ))}
             </View>
 
-            {/* 🚶‍♂️ ทางเดินตรงกลาง (เอาลูกศรออกแล้ว) */}
+            {/* 🚶‍♂️ ทางเดินตรงกลาง */}
             <View style={styles.aisle}>
               <Text style={styles.aisleText}>ทางเดิน</Text>
             </View>
 
             {/* ➡️ ฝั่งขวา */}
             <View style={styles.seatCol}>
-              {/* 🚀 ย้าย "ชั้นบน ชั้นล่าง" มาตรงกับหัวที่นั่งเป๊ะๆ */}
+              {/* 🚀 แก้หัวแถวฝั่งขวาให้เหมือนฝั่งซ้าย (คี่=ล่าง, คู่=บน) */}
               {isSleeper && (
                 <View style={styles.seatPairRowHeader}>
-                  <Text style={styles.colHeaderText}>ชั้นบน</Text>
                   <Text style={styles.colHeaderText}>ชั้นล่าง</Text>
+                  <Text style={styles.colHeaderText}>ชั้นบน</Text>
                 </View>
               )}
               {[3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47].map(n => (
@@ -224,7 +259,6 @@ export default function SelectSeatScreen() {
             </View>
           </View>
 
-          {/* ห้องน้ำด้านล่างขวา */}
           {isSleeper && (
             <View style={[styles.gridHeader, {alignItems: 'flex-end', marginTop: 10}]}>
               <View style={styles.facilityBox}><Text style={styles.facilityText}>ห้องน้ำ</Text></View>
@@ -237,9 +271,14 @@ export default function SelectSeatScreen() {
       {/* 💳 Footer สีขาวลอยด้านล่าง */}
       <View style={styles.bottomFooter}>
         <View style={styles.footerRow}>
-           <View>
+           <View style={{flex: 1, paddingRight: 10}}>
               <Text style={styles.footerLabel}>ที่นั่งที่เลือก</Text>
-              <Text style={styles.footerValue}>{selectedSeats.sort((a,b)=>a-b).join(', ') || '-'}</Text>
+              {/* แปลงข้อมูลโชว์ให้สวยๆ เช่น 1-12 กลายเป็น ตู้ 1: 12 */}
+              <Text style={styles.footerValue} numberOfLines={1}>
+                {selectedSeats.length > 0 
+                  ? selectedSeats.map(s => s.replace('-', ': ')).join(', ') 
+                  : '-'}
+              </Text>
            </View>
            <View style={{alignItems: 'flex-end'}}>
               <Text style={styles.footerLabel}>ราคารวม</Text>
@@ -255,6 +294,7 @@ export default function SelectSeatScreen() {
               params: {
                 ...params,
                 cabinNumber: currentCabinNum, 
+                // 🚀 ส่งข้อมูลรูปแบบ "ตู้-เลขที่นั่ง" ไปให้หน้า Summary บันทึกลง DB
                 selectedSeats: selectedSeats.join(', '),
                 totalPrice: getTotalPrice()
               }
@@ -293,7 +333,7 @@ const styles = StyleSheet.create({
   cabinTabTextActive: { color: '#FFF' },
 
   legendRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 15 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 10 }, // ขยับให้ห่างกันนิดนึงหลังจากลบสีม่วงออก
+  legendItem: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 10 }, 
   legendBox: { width: 14, height: 14, borderRadius: 4, marginRight: 5 },
   legendText: { fontSize: 10, color: '#757575', fontWeight: 'bold' },
 
@@ -308,7 +348,6 @@ const styles = StyleSheet.create({
   seatCol: { flex: 1, alignItems: 'center' }, 
   seatPairRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 8 }, 
   
-  // 🚀 สไตล์ที่เพิ่มมาใหม่เพื่อให้ป้าย "ชั้นบน / ชั้นล่าง" ตรงกับที่นั่งเป๊ะๆ
   seatPairRowHeader: { flexDirection: 'row', justifyContent: 'center', marginBottom: 15 },
   colHeaderText: { width: 36, marginHorizontal: 5, textAlign: 'center', color: '#A8AACC', fontSize: 10 },
   
