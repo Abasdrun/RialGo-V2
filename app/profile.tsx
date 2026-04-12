@@ -1,281 +1,441 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, Modal, TextInput, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
-import { decode } from 'base64-arraybuffer';
 import { supabase } from '../supabase';
+import * as ImagePicker from 'expo-image-picker'; 
+
+const { width } = Dimensions.get('window');
 
 export default function ProfileScreen() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [email, setEmail] = useState('loading...');
+  const [name, setName] = useState('Yoon'); 
+  const [initial, setInitial] = useState('Y');
   
-  // ข้อมูลตามตาราง profiles ของพี่ยอน
-  const [fullName, setFullName] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [idCardNumber, setIdCardNumber] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  // 🚀 State สำหรับเก็บ "รูปโปรไฟล์"
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
-    fetchProfile();
+    fetchUserData();
   }, []);
 
-  // 📥 1. ดึงข้อมูลโปรไฟล์จาก Database
-  const fetchProfile = async () => {
+  const fetchUserData = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('ไม่พบผู้ใช้งาน');
-
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('full_name, phone_number, id_card_number, avatar_url')
-        .eq('id', user.id)
-        .single();
-
-      if (data) {
-        setFullName(data.full_name || '');
-        setPhoneNumber(data.phone_number || '');
-        setIdCardNumber(data.id_card_number || '');
-        setAvatarUrl(data.avatar_url || null);
+      if (user) {
+        setEmail(user.email || 'No Email');
+        const displayName = user.user_metadata?.full_name || 'Yoon';
+        setName(displayName);
+        setInitial(displayName.charAt(0).toUpperCase());
+        // ถ้าเคยบันทึก URL รูปโปรไฟล์ไว้ ก็ดึงมาแสดงได้เลย
+        if (user.user_metadata?.avatar_url) {
+            setProfileImage(user.user_metadata.avatar_url);
+        }
+      } else {
+        setEmail('guest@railgo.com');
+        setName('Guest User');
+        setInitial('G');
       }
-    } catch (error: any) {
-      console.log('Error fetching profile:', error.message);
-    } finally {
-      setLoading(false);
+    } catch (error) {
+      console.error(error);
     }
   };
 
-  // 📸 2. ฟังก์ชันเลือกรูปและอัปโหลดเข้า Supabase Storage
-  const handlePickImage = async () => {
-    // ขอสิทธิ์เข้าถึงคลังรูปภาพ
+  // 🚀 ฟังก์ชันเปิดแกลลอรี่เพื่อ "เปลี่ยนรูปโปรไฟล์"
+  const pickImage = async () => {
+    // ขอสิทธิ์เข้าถึงอัลบั้มภาพ
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('แจ้งเตือน', 'ต้องอนุญาตให้แอปเข้าถึงรูปภาพก่อนนะครับ!');
+      Alert.alert('ขออภัย', 'แอปจำเป็นต้องขออนุญาตเข้าถึงอัลบั้มภาพของคุณครับ');
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
+    // เปิดหน้าเลือกรูป
+    let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.5, // ลดขนาดไฟล์หน่อยจะได้อัปลื่นๆ
-      base64: true, // สำคัญ! ต้องเอา base64 ไปอัปโหลด
+      allowsEditing: true, // ให้ผู้ใช้ครอปรูปได้เป็นสี่เหลี่ยม
+      aspect: [1, 1], // บังคับสัดส่วน 1:1
+      quality: 0.5, // ลดขนาดรูปนิดนึงจะได้ไม่หนัก
     });
 
-    if (!result.canceled && result.assets[0].base64) {
-      uploadAvatar(result.assets[0].base64);
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      const selectedImageUri = result.assets[0].uri;
+      setProfileImage(selectedImageUri); // เปลี่ยนรูปบน UI ทันที
     }
   };
 
-  const uploadAvatar = async (base64Str: string) => {
-    try {
-      setSaving(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const filePath = `${user.id}/${new Date().getTime()}.jpg`;
-
-      // อัปโหลดเข้า Bucket 'avatars'
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, decode(base64Str), { contentType: 'image/jpeg' });
-
-      if (uploadError) throw uploadError;
-
-      // เอาลิงก์รูปที่อัปเสร็จมาโชว์
-      const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
-      setAvatarUrl(data.publicUrl);
-      
-      Alert.alert('สำเร็จ', 'อัปโหลดรูปโปรไฟล์เรียบร้อยแล้ว!');
-    } catch (error: any) {
-      Alert.alert('อัปโหลดล้มเหลว', error.message);
-    } finally {
-      setSaving(false);
+  const handleUpdateProfile = async () => {
+    if (!editName.trim()) {
+      Alert.alert('แจ้งเตือน', 'กรุณากรอกชื่อของคุณครับ');
+      return;
     }
-  };
-
-  // 💾 3. ฟังก์ชันบันทึกข้อมูลส่วนตัว (Upsert ลงตาราง profiles)
-  // ✅ แก้ไข: เอา updated_at ออกแล้ว เพื่อให้ตรงกับโครงสร้างตาราง profiles ของมึง
-  const handleSaveProfile = async () => {
+    setIsUpdating(true);
     try {
-      setSaving(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('ไม่พบผู้ใช้งาน');
-
-      const updates = {
-        id: user.id,
-        full_name: fullName,
-        phone_number: phoneNumber,
-        id_card_number: idCardNumber,
-        avatar_url: avatarUrl,
-      };
-
-      const { error } = await supabase.from('profiles').upsert(updates);
+      const { data, error } = await supabase.auth.updateUser({
+        data: { full_name: editName }
+      });
       if (error) throw error;
-
-      // 📌 แทรกโค้ดยิงแจ้งเตือนตรงนี้ (หลัง upsert profiles)
-      await supabase.from('notifications').insert([{
-          user_id: user.id,
-          title: 'อัปเดตโปรไฟล์สำเร็จ',
-          message: 'ข้อมูลส่วนตัวของคุณได้รับการอัปเดตเรียบร้อยแล้ว',
-          type: 'success'
-      }]);
-      // 📌 จบการแทรกโค้ด
-
-      Alert.alert('สำเร็จ', 'อัปเดตข้อมูลส่วนตัวเรียบร้อยแล้วครับ! 🎉');
+      setName(editName);
+      setInitial(editName.charAt(0).toUpperCase());
+      setIsEditModalVisible(false);
+      Alert.alert('สำเร็จ', 'อัปเดตชื่อโปรไฟล์เรียบร้อยแล้ว! 🎉');
     } catch (error: any) {
-      Alert.alert('เกิดข้อผิดพลาด', error.message);
+      Alert.alert('เกิดข้อผิดพลาด', error.message || 'ไม่สามารถอัปเดตข้อมูลได้');
     } finally {
-      setSaving(false);
+      setIsUpdating(false);
     }
   };
 
-  // 🚪 4. ฟังก์ชันออกจากระบบ
+  const openEditModal = () => {
+    setEditName(name);
+    setIsEditModalVisible(true);
+  };
+
+  // 🚀 ฟังก์ชัน Logout เด้งไปหน้า Login
   const handleLogout = async () => {
     Alert.alert('ออกจากระบบ', 'คุณต้องการออกจากระบบใช่หรือไม่?', [
       { text: 'ยกเลิก', style: 'cancel' },
       { 
         text: 'ออกจากระบบ', 
-        style: 'destructive',
+        style: 'destructive', 
         onPress: async () => {
-          await supabase.auth.signOut();
-          router.replace('/login');
-        }
+          try {
+            await supabase.auth.signOut();
+            // 🚀 เด้งไปหน้า /login
+            router.replace('/login'); 
+          } catch (error) {
+            Alert.alert('ข้อผิดพลาด', 'ไม่สามารถออกจากระบบได้');
+          }
+        } 
       }
     ]);
   };
 
-  if (loading) {
-    return <View style={styles.loadingArea}><ActivityIndicator size="large" color="#5E35B1" /></View>;
-  }
+  const handleTabPress = (tab: string) => {
+    if (tab === 'home') router.push('/');
+    if (tab === 'location') router.push('/location'); 
+    if (tab === 'notifications') router.push('/notifications');
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+    <View style={styles.container}>
+      
+      <View style={styles.blueHeaderBg}>
+        <View style={styles.headerGraphicCircle1} />
+        <View style={styles.headerGraphicCircle2} />
+      </View>
+
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
         
-        {/* 🔝 Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#333" />
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtnArea}>
+            <Ionicons name="chevron-back" size={24} color="#FFF" />
+            <Text style={styles.headerTitle}>My Profile</Text>
           </TouchableOpacity>
-          <View style={styles.titleBox}>
-            <Ionicons name="person-outline" size={20} color="#333" />
-            <Text style={styles.titleText}>My Profile</Text>
-          </View>
-          <View style={{width: 40}} />
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           
-          {/* 📸 ส่วนอัปโหลดรูปโปรไฟล์ */}
-          <View style={styles.avatarSection}>
-            <View style={styles.avatarWrapper}>
-              {avatarUrl ? (
-                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Ionicons name="person" size={50} color="#BDBDBD" />
-                </View>
-              )}
-              <TouchableOpacity style={styles.editAvatarBtn} onPress={handlePickImage} disabled={saving}>
-                <Ionicons name="camera" size={18} color="#FFF" />
+          <View style={styles.profileSection}>
+            <View style={styles.avatarContainer}>
+              
+              {/* 🚀 ระบบรูปโปรไฟล์: มีรูปโชว์รูป ไม่มีรูปโชว์ตัวอักษร */}
+              <View style={styles.avatarCircle}>
+                {profileImage ? (
+                  <Image source={{ uri: profileImage }} style={styles.avatarImage} />
+                ) : (
+                  <Text style={styles.avatarText}>{initial}</Text>
+                )}
+              </View>
+
+              {/* 🚀 กดปุ่มดินสอที่รูป จะเรียกฟังก์ชัน pickImage เปิดแกลลอรี่ */}
+              <TouchableOpacity style={styles.editBadge} onPress={pickImage}>
+                <Ionicons name="pencil" size={12} color="#FFF" />
               </TouchableOpacity>
             </View>
-            <Text style={styles.userEmailText}>{fullName || 'พี่ยอน'}</Text>
-          </View>
-
-          {/* 📝 ฟอร์มข้อมูลส่วนตัว */}
-          <View style={styles.formSection}>
             
-            <Text style={styles.inputLabel}>ชื่อ-นามสกุล (Full Name)</Text>
-            <View style={styles.inputContainer}>
-              <Ionicons name="person-outline" size={20} color="#5E35B1" style={styles.inputIcon} />
-              <TextInput
-                style={styles.textInput}
-                placeholder="กรอกชื่อ-นามสกุล"
-                placeholderTextColor="#9E9E9E"
-                value={fullName}
-                onChangeText={setFullName}
-              />
+            <Text style={styles.userNameText}>{name}</Text>
+            <Text style={styles.userEmailText}>{email}</Text>
+            
+            <View style={styles.memberSinceBadge}>
+              <Ionicons name="calendar-outline" size={12} color="#D1C4E9" style={{marginRight: 5}} />
+              <Text style={styles.memberSinceText}>สมาชิกตั้งแต่ มกราคม 2024</Text>
             </View>
-
-            <Text style={styles.inputLabel}>เบอร์โทรศัพท์ (Phone Number)</Text>
-            <View style={styles.inputContainer}>
-              <Ionicons name="call-outline" size={20} color="#5E35B1" style={styles.inputIcon} />
-              <TextInput
-                style={styles.textInput}
-                placeholder="08X-XXX-XXXX"
-                placeholderTextColor="#9E9E9E"
-                value={phoneNumber}
-                onChangeText={setPhoneNumber}
-                keyboardType="phone-pad"
-              />
-            </View>
-
-            <Text style={styles.inputLabel}>เลขบัตรประชาชน (ID Card Number)</Text>
-            <View style={styles.inputContainer}>
-              <Ionicons name="card-outline" size={20} color="#5E35B1" style={styles.inputIcon} />
-              <TextInput
-                style={styles.textInput}
-                placeholder="X-XXXX-XXXXX-XX-X"
-                placeholderTextColor="#9E9E9E"
-                value={idCardNumber}
-                onChangeText={setIdCardNumber}
-                keyboardType="number-pad"
-                maxLength={13}
-              />
-            </View>
-
           </View>
 
-          {/* 🔘 ปุ่ม Action */}
-          <TouchableOpacity 
-            style={[styles.saveBtn, saving && {backgroundColor: '#B39DDB'}]} 
-            onPress={handleSaveProfile}
-            disabled={saving}
-          >
-            {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveBtnText}>บันทึกข้อมูล</Text>}
-          </TouchableOpacity>
+          <View style={styles.statsCard}>
+            <View style={styles.statCol}>
+              <Text style={[styles.statValue, {color: '#5E35B1'}]}>47</Text>
+              <Text style={styles.statLabelThai}>เที่ยวที่จอง</Text>
+              <Text style={styles.statLabelEng}>TRIPS</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statCol}>
+              <Text style={[styles.statValue, {color: '#4CAF50'}]}>12,840</Text>
+              <Text style={styles.statLabelThai}>กม. ที่เดินทาง</Text>
+              <Text style={styles.statLabelEng}>KM</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statCol}>
+              <Text style={[styles.statValue, {color: '#FBC02D'}]}>2,350</Text>
+              <Text style={styles.statLabelThai}>คะแนนสะสม</Text>
+              <Text style={styles.statLabelEng}>PTS</Text>
+            </View>
+          </View>
 
-          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-            <Ionicons name="log-out-outline" size={20} color="#E91E63" />
-            <Text style={styles.logoutBtnText}>ออกจากระบบ</Text>
-          </TouchableOpacity>
+          <View style={styles.membershipCard}>
+            <View style={styles.goldBadge}>
+              <Ionicons name="star" size={10} color="#FBC02D" />
+              <Text style={styles.goldBadgeText}>Gold Member</Text>
+            </View>
+            
+            <View style={styles.membershipContent}>
+              <View style={styles.membershipIconBox}>
+                <Ionicons name="star-outline" size={24} color="#4CAF50" />
+              </View>
+              <View style={styles.membershipInfo}>
+                <Text style={styles.membershipName}>{name}</Text>
+                <Text style={styles.membershipExpiry}>ต่ออายุปีถัดไป ธ.ค. 2026</Text>
+              </View>
+              <View style={styles.membershipPoints}>
+                <Text style={styles.pointsValue}>2,350</Text>
+                <Text style={styles.pointsLabel}>คะแนน</Text>
+              </View>
+            </View>
+          </View>
+
+          <Text style={styles.menuSectionTitle}>บัญชีและระดับ</Text>
+          
+          <View style={styles.menuCard}>
+            {/* 🚀 กดเมนูนี้เพื่อเปิด Modal แก้ไขชื่อ */}
+            <TouchableOpacity style={styles.menuRow} onPress={openEditModal}>
+              <View style={[styles.menuIconBox, {backgroundColor: '#EBE4FF'}]}>
+                <Ionicons name="person-outline" size={20} color="#5E35B1" />
+              </View>
+              <View style={styles.menuTextCol}>
+                <Text style={styles.menuMainText}>ข้อมูลส่วนตัว</Text>
+                <Text style={styles.menuSubText}>ชื่อ, อีเมล, เบอร์โทร</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#BDBDBD" />
+            </TouchableOpacity>
+            
+            <View style={styles.menuDivider} />
+
+            <TouchableOpacity style={styles.menuRow}>
+              <View style={[styles.menuIconBox, {backgroundColor: '#E0F2F1'}]}>
+                <Ionicons name="document-text-outline" size={20} color="#00BCD4" />
+              </View>
+              <View style={styles.menuTextCol}>
+                <Text style={styles.menuMainText}>เอกสารของฉัน</Text>
+                <Text style={styles.menuSubText}>บัตรประชาชน, พาสปอร์ต</Text>
+              </View>
+              <View style={styles.menuBadgePurple}><Text style={styles.menuBadgeTextWhite}>2 ใบ</Text></View>
+              <Ionicons name="chevron-forward" size={16} color="#BDBDBD" />
+            </TouchableOpacity>
+
+            <View style={styles.menuDivider} />
+
+            <TouchableOpacity style={styles.menuRow}>
+              <View style={[styles.menuIconBox, {backgroundColor: '#FFF9C4'}]}>
+                <Ionicons name="card-outline" size={20} color="#FBC02D" />
+              </View>
+              <View style={styles.menuTextCol}>
+                <Text style={styles.menuMainText}>วิธีการชำระเงิน</Text>
+                <Text style={styles.menuSubText}>บัตร, PromptPay, TrueMoney</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#BDBDBD" />
+            </TouchableOpacity>
+
+            <View style={styles.menuDivider} />
+
+            <TouchableOpacity style={styles.menuRow}>
+              <View style={[styles.menuIconBox, {backgroundColor: '#EDE7F6'}]}>
+                <Ionicons name="star-outline" size={20} color="#7E57C2" />
+              </View>
+              <View style={styles.menuTextCol}>
+                <Text style={styles.menuMainText}>คะแนนสะสม & รางวัล</Text>
+                <Text style={styles.menuSubText}>ดูและแลกคะแนน</Text>
+              </View>
+              <View style={styles.menuBadgeYellow}><Text style={styles.menuBadgeTextYellow}>2,350 pts</Text></View>
+              <Ionicons name="chevron-forward" size={16} color="#BDBDBD" />
+            </TouchableOpacity>
+
+            <View style={styles.menuDivider} />
+
+            {/* 🚀 ปุ่มออกจากระบบ (Logout) */}
+            <TouchableOpacity style={styles.menuRow} onPress={handleLogout}>
+              <View style={[styles.menuIconBox, {backgroundColor: '#FFEBEE'}]}>
+                <Ionicons name="log-out-outline" size={20} color="#F44336" />
+              </View>
+              <View style={styles.menuTextCol}>
+                <Text style={[styles.menuMainText, {color: '#F44336'}]}>ออกจากระบบ</Text>
+                <Text style={styles.menuSubText}>ลงชื่อออกเพื่อสลับบัญชีผู้ใช้</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#BDBDBD" />
+            </TouchableOpacity>
+
+          </View>
 
         </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+
+      <View style={styles.bottomTabBar}>
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabPress('home')}>
+          <Ionicons name="home-outline" size={24} color="#757575" />
+          <Text style={styles.tabItemText}>Home</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabPress('location')}>
+          <Ionicons name="location-outline" size={24} color="#757575" />
+          <Text style={styles.tabItemText}>Location</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabPress('notifications')}>
+          <Ionicons name="notifications-outline" size={24} color="#757575" />
+          <Text style={styles.tabItemText}>Notifications</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={styles.tabItemActive}>
+          <Ionicons name="person-circle" size={26} color="#5E35B1" />
+          <Text style={styles.tabItemTextActive}>My Profile</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ========================================================= */}
+      {/* 🔮 Modal สำหรับแก้ไขข้อมูลชื่อ */}
+      {/* ========================================================= */}
+      <Modal visible={isEditModalVisible} animationType="fade" transparent>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.editModalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>แก้ไขข้อมูลส่วนตัว</Text>
+              <TouchableOpacity onPress={() => setIsEditModalVisible(false)}>
+                <Ionicons name="close" size={24} color="#757575" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.inputLabel}>ชื่อ-นามสกุล</Text>
+            <View style={styles.inputWrapper}>
+              <Ionicons name="person-outline" size={20} color="#5E35B1" style={{marginRight: 10}} />
+              <TextInput
+                style={styles.textInput}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="กรอกชื่อของคุณ"
+                placeholderTextColor="#BDBDBD"
+              />
+            </View>
+
+            <Text style={styles.inputLabel}>อีเมล (ไม่สามารถเปลี่ยนได้)</Text>
+            <View style={[styles.inputWrapper, {backgroundColor: '#F5F5F5'}]}>
+              <Ionicons name="mail-outline" size={20} color="#9E9E9E" style={{marginRight: 10}} />
+              <TextInput
+                style={[styles.textInput, {color: '#9E9E9E'}]}
+                value={email}
+                editable={false}
+              />
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.saveBtn, isUpdating && {opacity: 0.7}]} 
+              onPress={handleUpdateProfile}
+              disabled={isUpdating}
+            >
+              {isUpdating ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.saveBtnText}>บันทึกข้อมูล</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFAFA' },
-  loadingArea: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FAFAFA' },
+  container: { flex: 1, backgroundColor: '#F9F9F9' },
+  safeArea: { flex: 1, zIndex: 10 },
   
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
-  titleBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 25, height: 45, marginHorizontal: 15, paddingHorizontal: 15, elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
-  titleText: { marginLeft: 10, fontSize: 16, fontWeight: 'bold', color: '#333' },
+  blueHeaderBg: { position: 'absolute', top: 0, left: 0, right: 0, height: 420, backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, overflow: 'hidden', zIndex: 0 },
+  headerGraphicCircle1: { position: 'absolute', right: -50, top: 50, width: 250, height: 250, borderRadius: 125, backgroundColor: 'rgba(255,255,255,0.05)' },
+  headerGraphicCircle2: { position: 'absolute', left: -100, top: 150, width: 300, height: 300, borderRadius: 150, backgroundColor: 'rgba(255,255,255,0.03)' },
   
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 50 },
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, zIndex: 20 },
+  backBtnArea: { flexDirection: 'row', alignItems: 'center' },
+  headerTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
 
-  avatarSection: { alignItems: 'center', marginVertical: 30 },
-  avatarWrapper: { position: 'relative' },
-  avatarImage: { width: 120, height: 120, borderRadius: 60, borderWidth: 3, borderColor: '#5E35B1' },
-  avatarPlaceholder: { width: 120, height: 120, borderRadius: 60, backgroundColor: '#EEEEEE', justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: '#BDBDBD' },
-  editAvatarBtn: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#5E35B1', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: '#FAFAFA', elevation: 4 },
-  userEmailText: { marginTop: 15, fontSize: 20, fontWeight: 'bold', color: '#333' },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 120 }, 
+  
+  profileSection: { alignItems: 'center', marginTop: 20, marginBottom: 30 },
+  avatarContainer: { position: 'relative', marginBottom: 15 },
+  // 🚀 สไตล์ที่เพิ่มมาสำหรับกรอบรูป
+  avatarCircle: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#3F51B5', justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.2)', overflow: 'hidden' },
+  avatarText: { fontSize: 40, color: '#FFF', fontWeight: 'bold' },
+  avatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  
+  editBadge: { position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: '#262956', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#FFF' },
+  userNameText: { fontSize: 18, fontWeight: 'bold', color: '#FFF', marginBottom: 5 },
+  userEmailText: { fontSize: 12, color: '#A8AACC', marginBottom: 15 },
+  memberSinceBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 15, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#5E35B1' },
+  memberSinceText: { fontSize: 11, color: '#FFF' },
 
-  formSection: { marginBottom: 30 },
-  inputLabel: { fontSize: 13, fontWeight: 'bold', color: '#757575', marginBottom: 8, marginLeft: 5 },
-  inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 20, paddingHorizontal: 15, height: 55, marginBottom: 20, borderWidth: 1, borderColor: '#E0E0E0', elevation: 1 },
-  inputIcon: { marginRight: 10 },
+  statsCard: { flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 25, paddingVertical: 20, paddingHorizontal: 10, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, marginBottom: 20 },
+  statCol: { flex: 1, alignItems: 'center' },
+  statValue: { fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
+  statLabelThai: { fontSize: 10, color: '#757575', marginBottom: 2 },
+  statLabelEng: { fontSize: 9, color: '#BDBDBD', fontWeight: 'bold' },
+  statDivider: { width: 1, backgroundColor: '#EEEEEE', marginVertical: 10 },
+
+  membershipCard: { backgroundColor: '#1E2046', borderRadius: 25, padding: 20, marginBottom: 25, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 10 },
+  goldBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(251,192,45,0.2)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 15, alignSelf: 'flex-start', marginBottom: 15, borderWidth: 1, borderColor: 'rgba(251,192,45,0.5)' },
+  goldBadgeText: { fontSize: 10, color: '#FBC02D', fontWeight: 'bold', marginLeft: 5 },
+  membershipContent: { flexDirection: 'row', alignItems: 'center' },
+  membershipIconBox: { width: 45, height: 45, borderRadius: 12, backgroundColor: 'rgba(76,175,80,0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 15, borderWidth: 1, borderColor: '#4CAF50' },
+  membershipInfo: { flex: 1 },
+  membershipName: { fontSize: 14, fontWeight: 'bold', color: '#FFF', marginBottom: 3 },
+  membershipExpiry: { fontSize: 10, color: '#A8AACC' },
+  membershipPoints: { alignItems: 'flex-end' },
+  pointsValue: { fontSize: 20, fontWeight: 'bold', color: '#FBC02D' },
+  pointsLabel: { fontSize: 10, color: '#A8AACC' },
+
+  menuSectionTitle: { fontSize: 14, fontWeight: 'bold', color: '#333', marginLeft: 5, marginBottom: 15 },
+  menuCard: { backgroundColor: '#FFF', borderRadius: 25, padding: 10, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5 },
+  menuRow: { flexDirection: 'row', alignItems: 'center', padding: 10 },
+  menuIconBox: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+  menuTextCol: { flex: 1, justifyContent: 'center' },
+  menuMainText: { fontSize: 13, fontWeight: 'bold', color: '#333', marginBottom: 2 },
+  menuSubText: { fontSize: 10, color: '#9E9E9E' },
+  menuDivider: { height: 1, backgroundColor: '#F5F5F5', marginHorizontal: 10 },
+  
+  menuBadgePurple: { backgroundColor: '#D1C4E9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginRight: 10 },
+  menuBadgeTextWhite: { fontSize: 10, color: '#5E35B1', fontWeight: 'bold' },
+  menuBadgeYellow: { backgroundColor: '#FFF9C4', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginRight: 10, borderWidth: 1, borderColor: '#FBC02D' },
+  menuBadgeTextYellow: { fontSize: 10, color: '#FBC02D', fontWeight: 'bold' },
+
+  bottomTabBar: { position: 'absolute', bottom: 20, left: 20, right: 20, height: 70, backgroundColor: '#FFF', borderRadius: 35, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 15 },
+  tabItem: { alignItems: 'center', justifyContent: 'center', flex: 1 },
+  tabItemActive: { alignItems: 'center', justifyContent: 'center', flex: 1 },
+  tabItemText: { fontSize: 10, color: '#757575', marginTop: 4, fontWeight: '500' },
+  tabItemTextActive: { fontSize: 10, color: '#5E35B1', marginTop: 4, fontWeight: 'bold' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
+  editModalContainer: { width: '100%', backgroundColor: '#FFF', borderRadius: 25, padding: 25, elevation: 5 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+  inputLabel: { fontSize: 12, color: '#757575', marginBottom: 8, marginLeft: 5 },
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 15, paddingHorizontal: 15, height: 50, marginBottom: 20 },
   textInput: { flex: 1, fontSize: 16, color: '#333' },
-
-  saveBtn: { width: '100%', height: 55, backgroundColor: '#5E35B1', borderRadius: 25, justifyContent: 'center', alignItems: 'center', elevation: 3, marginBottom: 20 },
-  saveBtnText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-
-  logoutBtn: { flexDirection: 'row', width: '100%', height: 55, backgroundColor: '#FFF', borderRadius: 25, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E91E63' },
-  logoutBtnText: { color: '#E91E63', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
+  saveBtn: { backgroundColor: '#5E35B1', height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginTop: 10 },
+  saveBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 });

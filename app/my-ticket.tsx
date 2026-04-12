@@ -265,40 +265,54 @@ export default function MyTicketScreen() {
       </SafeAreaView>
 
       {/* ========================================== */}
-      {/* 🔮 MODAL: รายละเอียดตั๋ว (หน้าต่างสีน้ำเงิน) */}
+      {/* 🔮 MODAL: รายละเอียดตั๋ว (อัปเดตสไตล์ให้ตรงปก) */}
       {/* ========================================== */}
       <Modal visible={!!selectedTicket} animationType="slide" transparent>
         <View style={styles.modalFullBg}>
+          
+          {/* 🌊 Header โค้งมนสีน้ำเงินเข้มใน Modal */}
+          <View style={styles.modalBlueHeaderBg}>
+             <View style={styles.headerGraphicCircle} />
+          </View>
+
           <RNSafeAreaView style={{flex: 1}}>
             <View style={styles.modalHeaderRow}>
               <TouchableOpacity onPress={() => setSelectedTicket(null)} style={styles.backBtnCircle}>
                 <Ionicons name="chevron-back" size={24} color="#FFF" />
               </TouchableOpacity>
-              <Text style={styles.headerTitle}>รายละเอียดตั๋ว</Text>
+              <Text style={styles.modalHeaderTitle}>รายละเอียดตั๋ว</Text>
               <View style={{width: 40}} />
             </View>
 
             {selectedTicket && (
-              <ScrollView contentContainerStyle={styles.modalScroll}>
+              <ScrollView contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
                 
                 <View style={styles.modalTopInfo}>
-                  <View style={styles.confirmedBadge}><Text style={styles.confirmedText}>● ยืนยันแล้ว</Text></View>
-                  <Text style={styles.refText}>{selectedTicket.refCode}</Text>
+                  <View style={styles.confirmedBadge}>
+                    <Text style={styles.confirmedText}>● ยืนยันแล้ว</Text>
+                  </View>
+                  <Text style={styles.refText}>#{selectedTicket.refCode}</Text>
                 </View>
 
                 <View style={styles.modalRouteRow}>
-                  <View><Text style={styles.modalCityText}>{selectedTicket.origin}</Text><Text style={styles.modalCodeText}>BKK - {selectedTicket.depTime}น.</Text></View>
+                  <View>
+                    <Text style={styles.modalCityText}>{selectedTicket.origin}</Text>
+                    <Text style={styles.modalCodeText}>BKK - {selectedTicket.depTime}น.</Text>
+                  </View>
                   <View style={styles.modalArrowCol}>
                     <Ionicons name="arrow-forward" size={24} color="#A8AACC" />
                     <Text style={styles.modalDurationText}>{selectedTicket.duration}</Text>
                   </View>
-                  <View style={{alignItems: 'flex-end'}}><Text style={styles.modalCityText}>{selectedTicket.dest}</Text><Text style={styles.modalCodeText}>CMP - {selectedTicket.arrTime}น.</Text></View>
+                  <View style={{alignItems: 'flex-end'}}>
+                    <Text style={styles.modalCityText}>{selectedTicket.dest}</Text>
+                    <Text style={styles.modalCodeText}>CMP - {selectedTicket.arrTime}น.</Text>
+                  </View>
                 </View>
 
-                <View style={styles.modalWhiteCard}>
+                <View style={styles.modalDarkCard}>
                   
                   <View style={styles.grid3Col}>
-                    <View style={styles.colItem}><Text style={styles.colLabel}>วันที่</Text><Text style={styles.colValue}>{selectedTicket.date}</Text></View>
+                    <View style={styles.colItem}><Text style={styles.colLabel}>วันที่</Text><Text style={styles.colValue}>{selectedTicket.date.split(' ')[0]} {selectedTicket.date.split(' ')[1]}</Text></View>
                     <View style={[styles.colItem, styles.colCenter]}><Text style={styles.colLabel}>ที่นั่ง</Text><Text style={styles.colValue}>{selectedTicket.seat}</Text></View>
                     <View style={[styles.colItem, {alignItems: 'flex-end'}]}><Text style={styles.colLabel}>ตู้</Text><Text style={styles.colValue}>{selectedTicket.cabin}</Text></View>
                   </View>
@@ -310,7 +324,7 @@ export default function MyTicketScreen() {
                       <Text style={styles.timelineTime}>{selectedTicket.depTime}</Text>
                       <View style={styles.timelineLineGroup}>
                         <View style={styles.dotOutline} />
-                        <View style={styles.lineDashed} />
+                        <View style={styles.lineSolid} />
                       </View>
                       <View style={styles.timelineContent}>
                         <Text style={styles.timelineCity}>สถานี{selectedTicket.origin}</Text>
@@ -327,7 +341,7 @@ export default function MyTicketScreen() {
                       <View style={styles.timelineLineGroup}>
                         <View style={styles.dotFilled} />
                       </View>
-                      <View style={styles.timelineContent}>
+                      <View style={[styles.timelineContent, {paddingBottom: 0}]}>
                         <Text style={styles.timelineCity}>สถานี{selectedTicket.dest}</Text>
                         <Text style={styles.timelineSub}>จุดหมายปลายทาง</Text>
                       </View>
@@ -338,19 +352,19 @@ export default function MyTicketScreen() {
 
                   <View style={styles.grid2x2}>
                     <View style={styles.boxItem}>
-                      <View style={[styles.boxIcon, {backgroundColor: 'rgba(94,53,177,0.2)'}]}><MaterialCommunityIcons name="view-grid" size={18} color="#9575CD" /></View>
+                      <View style={[styles.boxIcon, {backgroundColor: '#262956'}]}><MaterialCommunityIcons name="view-grid" size={18} color="#9575CD" /></View>
                       <View><Text style={styles.boxLabel}>ประเภท</Text><Text style={styles.boxValue}>{selectedTicket.classType}</Text></View>
                     </View>
                     <View style={styles.boxItem}>
-                      <View style={[styles.boxIcon, {backgroundColor: 'rgba(76,175,80,0.2)'}]}><Ionicons name="location" size={18} color="#4CAF50" /></View>
+                      <View style={[styles.boxIcon, {backgroundColor: '#262956'}]}><Ionicons name="location" size={18} color="#4CAF50" /></View>
                       <View><Text style={styles.boxLabel}>ขบวน</Text><Text style={styles.boxValue}>{selectedTicket.trainName}</Text></View>
                     </View>
                     <View style={styles.boxItem}>
-                      <View style={[styles.boxIcon, {backgroundColor: 'rgba(251,192,45,0.2)'}]}><Ionicons name="sync" size={18} color="#FBC02D" /></View>
+                      <View style={[styles.boxIcon, {backgroundColor: '#262956'}]}><Ionicons name="sync" size={18} color="#FBC02D" /></View>
                       <View><Text style={styles.boxLabel}>ราคา</Text><Text style={styles.boxValue}>THB {selectedTicket.price.toLocaleString()}</Text></View>
                     </View>
                     <View style={styles.boxItem}>
-                      <View style={[styles.boxIcon, {backgroundColor: 'rgba(156,39,176,0.2)'}]}><Ionicons name="train" size={18} color="#BA68C8" /></View>
+                      <View style={[styles.boxIcon, {backgroundColor: '#262956'}]}><Ionicons name="train" size={18} color="#BA68C8" /></View>
                       <View><Text style={styles.boxLabel}>สถานี</Text><Text style={styles.boxValue} numberOfLines={1}>สถานี{selectedTicket.dest}</Text></View>
                     </View>
                   </View>
@@ -428,16 +442,20 @@ const styles = StyleSheet.create({
   emptyText: { color: '#9E9E9E', marginTop: 15, fontSize: 16 },
 
   // ===================================
-  // สไตล์สำหรับหน้าต่างรายละเอียดตั๋ว (Modal)
+  // 🔮 สไตล์ใหม่สำหรับ Modal ตามภาพเรฟเฟอเรนซ์
   // ===================================
-  modalFullBg: { flex: 1, backgroundColor: '#262956' }, // สีน้ำเงินเข้มเต็มจอ
+  modalFullBg: { flex: 1, backgroundColor: '#F5F5F5' }, 
+  modalBlueHeaderBg: { position: 'absolute', top: 0, left: 0, right: 0, height: 280, backgroundColor: '#2E3165', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, zIndex: 0 },
+  
   modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 },
+  modalHeaderTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 15 },
+  
   modalScroll: { paddingHorizontal: 20, paddingBottom: 50 },
   
   modalTopInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 25 },
-  confirmedBadge: { backgroundColor: '#E8F5E9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginRight: 15 },
+  confirmedBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(76, 175, 80, 0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 15, marginRight: 10, borderWidth: 1, borderColor: 'rgba(76, 175, 80, 0.5)' },
   confirmedText: { color: '#4CAF50', fontSize: 10, fontWeight: 'bold' },
-  refText: { color: '#A8AACC', fontSize: 12 },
+  refText: { color: '#A8AACC', fontSize: 10, fontWeight: '500' },
 
   modalRouteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
   modalCityText: { fontSize: 22, fontWeight: 'bold', color: '#FFF' },
@@ -445,35 +463,36 @@ const styles = StyleSheet.create({
   modalArrowCol: { alignItems: 'center' },
   modalDurationText: { fontSize: 10, color: '#A8AACC', marginTop: 5 },
 
-  modalWhiteCard: { backgroundColor: '#1E2046', borderRadius: 25, padding: 20, borderWidth: 1, borderColor: '#3A3C59' },
+  modalDarkCard: { backgroundColor: '#1E2046', borderRadius: 25, padding: 25, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 },
+  
   grid3Col: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   colItem: { flex: 1 },
-  colCenter: { alignItems: 'center', borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#3A3C59' },
+  colCenter: { alignItems: 'center', borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#3A3C59', paddingHorizontal: 10 },
   colLabel: { fontSize: 11, color: '#A8AACC', marginBottom: 5 },
   colValue: { fontSize: 14, fontWeight: 'bold', color: '#FFF' },
 
   dividerDark: { height: 1, backgroundColor: '#3A3C59', marginVertical: 20 },
 
   timelineSection: { paddingLeft: 10 },
-  timelineRow: { flexDirection: 'row', marginBottom: 25 },
+  timelineRow: { flexDirection: 'row', marginBottom: 0 },
   timelineTime: { color: '#FFF', fontSize: 14, fontWeight: 'bold', width: 45, marginTop: -2 },
   timelineLineGroup: { width: 30, alignItems: 'center', marginRight: 10 },
-  dotOutline: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: '#A8AACC', backgroundColor: '#1E2046' },
-  dotFilled: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FFF' },
-  lineDashed: { width: 2, height: 50, backgroundColor: '#A8AACC', marginVertical: 2, borderStyle: 'dashed' },
-  timelineContent: { flex: 1 },
+  dotOutline: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: '#FFF', backgroundColor: '#1E2046', zIndex: 2 },
+  dotFilled: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#FFF', zIndex: 2 },
+  lineSolid: { width: 2, height: 60, backgroundColor: '#FFF', marginVertical: -2, zIndex: 1 },
+  timelineContent: { flex: 1, paddingBottom: 25 },
   timelineCity: { color: '#FFF', fontSize: 14, fontWeight: 'bold', marginBottom: 3 },
   timelineSub: { color: '#A8AACC', fontSize: 12, marginBottom: 8 },
   travelTimeBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#262956', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15, alignSelf: 'flex-start' },
   travelTimeText: { color: '#A8AACC', fontSize: 10 },
 
   grid2x2: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  boxItem: { width: '48%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#262956', padding: 12, borderRadius: 15, marginBottom: 10 },
-  boxIcon: { width: 32, height: 32, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  boxItem: { width: '48%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E2046', padding: 12, borderRadius: 20, marginBottom: 15, borderWidth: 1, borderColor: '#3A3C59' },
+  boxIcon: { width: 36, height: 36, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   boxLabel: { fontSize: 10, color: '#A8AACC' },
   boxValue: { fontSize: 12, fontWeight: 'bold', color: '#FFF', marginTop: 2 },
 
-  yellowWarningBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FCE4EC', padding: 20, borderRadius: 20, marginTop: 25, backgroundColor: '#FDE047' },
+  yellowWarningBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FDE047', paddingVertical: 20, paddingHorizontal: 20, borderRadius: 30, marginTop: 25, marginBottom: 20, elevation: 5, shadowColor: '#FBC02D', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 },
   warningLabel: { fontSize: 10, color: '#333' },
   warningTime: { fontSize: 16, fontWeight: 'bold', color: '#333', marginTop: 2 },
   warningDate: { fontSize: 12, fontWeight: 'bold', color: '#333' },
