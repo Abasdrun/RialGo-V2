@@ -83,6 +83,24 @@ export default function AdminTripsScreen() {
 
       if (trainErr) throw trainErr;
 
+      // 🚀 สเตป 1.5: เพิ่มจุดจอดรถ (train_stops) ต้นทางและปลายทาง
+      const { error: stopsErr } = await supabase.from('train_stops').insert([
+        { 
+          train_id: newTrain.id, 
+          station_id: originId, 
+          stop_order: 1, 
+          departure_time: depTime 
+        },
+        { 
+          train_id: newTrain.id, 
+          station_id: destId, 
+          stop_order: 2, 
+          arrival_time: arrTime 
+        }
+      ]);
+
+      if (stopsErr) throw stopsErr;
+
       // สเตป 2: สร้างรอบเดินทาง (trips)
       const { error: tripErr } = await supabase.from('trips').insert({
         train_id: newTrain.id,
