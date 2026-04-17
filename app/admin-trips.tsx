@@ -1,23 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Modal, TextInput, Alert, ScrollView } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Modal, TextInput, Alert, ScrollView, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { router, useFocusEffect } from 'expo-router';
 import { supabase } from '../supabase';
+
+const { width } = Dimensions.get('window');
 
 export default function AdminTripsScreen() {
   const [trips, setTrips] = useState<any[]>([]);
   const [stations, setStations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // 🟢 States สำหรับ Modal ฟอร์มเพิ่มรอบรถ
   const [isModalVisible, setModalVisible] = useState(false);
   const [selectingStation, setSelectingStation] = useState<'origin' | 'dest' | null>(null);
-  const [searchQuery, setSearchQuery] = useState(''); // 📌 เพิ่ม State ค้นหาสถานี
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedLine, setSelectedLine] = useState('ทั้งหมด');
 
-  // ข้อมูลฟอร์ม
-  const [trainNumber, setTrainNumber] = useState('');
-  const [trainType, setTrainType] = useState('รถด่วนพิเศษ');
+  const [trainType, setTrainType] = useState('รถด่วนพิเศษ'); 
   const [originId, setOriginId] = useState<number | null>(null);
   const [originName, setOriginName] = useState('เลือกต้นทาง');
   const [destId, setDestId] = useState<number | null>(null);
@@ -28,27 +28,24 @@ export default function AdminTripsScreen() {
   const [seats, setSeats] = useState('120');
   const [status, setStatus] = useState('Scheduled');
 
-  useEffect(() => {
-    fetchTrips();
-    fetchStations();
-    
-    // เซ็ตวันที่เริ่มต้นเป็นวันนี้
-    const today = new Date();
-    setDepDate(today.toISOString().split('T')[0]);
-  }, []);
+  const trainLines = ['ทั้งหมด', 'สายกลาง', 'สายเหนือ', 'สายตะวันออกเฉียงเหนือ', 'สายใต้', 'สายตะวันออก'];
 
-  // 📥 1. ดึงรอบรถ
+  useFocusEffect(
+    useCallback(() => {
+      fetchTrips();
+      fetchStations();
+      const today = new Date();
+      setDepDate(today.toISOString().split('T')[0]);
+    }, [])
+  );
+
   const fetchTrips = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('trips')
       .select(`
         id, departure_date, available_seats, status,
-        trains (
-          id, train_number, type, departure_time, arrival_time,
-          origin:origin_station_id(station_name),
-          dest:destination_station_id(station_name)
-        )
+        trains ( id, type, departure_time, arrival_time, origin:origin_station_id(station_name), dest:destination_station_id(station_name) )
       `)
       .order('departure_date', { ascending: false });
 
@@ -56,66 +53,44 @@ export default function AdminTripsScreen() {
     setLoading(false);
   };
 
-  // 🚉 2. ดึงสถานีทั้งหมดเพื่อเอามาเข้าลิสต์ค้นหา (ดึง province มาด้วยเพื่อโชว์สวยๆ)
   const fetchStations = async () => {
     const { data } = await supabase.from('stations').select('*').order('km', { ascending: true });
     if (data) setStations(data);
   };
 
-  // 💾 3. ฟังก์ชันบันทึกรอบรถ
   const handleAddTrip = async () => {
-    if (!trainNumber || !originId || !destId || !depTime || !arrTime || !depDate) {
-      Alert.alert('แจ้งเตือน', 'กรุณากรอกข้อมูลให้ครบทุกช่อง!');
+    if (!originId || !destId || !depTime || !arrTime || !depDate) {
+      Alert.alert('แจ้งเตือน', 'กรุณากรอกข้อมูลเส้นทางและวันเวลาให้ครบ!');
       return;
     }
-
     try {
       setLoading(true);
-      // สเตป 1: สร้างขบวนรถ (trains)
       const { data: newTrain, error: trainErr } = await supabase.from('trains').insert({
-        train_number: trainNumber,
         type: trainType,
         departure_time: depTime,
         arrival_time: arrTime,
         origin_station_id: originId,
         destination_station_id: destId
       }).select().single();
-
       if (trainErr) throw trainErr;
 
-      // 🚀 สเตป 1.5: เพิ่มจุดจอดรถ (train_stops) ต้นทางและปลายทาง
-      const { error: stopsErr } = await supabase.from('train_stops').insert([
-        { 
-          train_id: newTrain.id, 
-          station_id: originId, 
-          stop_order: 1, 
-          departure_time: depTime 
-        },
-        { 
-          train_id: newTrain.id, 
-          station_id: destId, 
-          stop_order: 2, 
-          arrival_time: arrTime 
-        }
+      await supabase.from('train_stops').insert([
+        { train_id: newTrain.id, station_id: originId, stop_order: 1, departure_time: depTime },
+        { train_id: newTrain.id, station_id: destId, stop_order: 2, arrival_time: arrTime }
       ]);
 
-      if (stopsErr) throw stopsErr;
-
-      // สเตป 2: สร้างรอบเดินทาง (trips)
       const { error: tripErr } = await supabase.from('trips').insert({
         train_id: newTrain.id,
         departure_date: depDate,
         available_seats: parseInt(seats),
         status: status
       });
-
       if (tripErr) throw tripErr;
 
       Alert.alert('สำเร็จ!', 'เพิ่มรอบรถไฟเรียบร้อยแล้ว!');
       setModalVisible(false);
       resetForm();
       fetchTrips();
-
     } catch (error: any) {
       Alert.alert('เกิดข้อผิดพลาด', error.message);
     } finally {
@@ -124,19 +99,14 @@ export default function AdminTripsScreen() {
   };
 
   const resetForm = () => {
-    setTrainNumber('');
     setOriginId(null); setOriginName('เลือกต้นทาง');
     setDestId(null); setDestName('เลือกปลายทาง');
   };
 
-  // 🗑️ 4. ฟังก์ชันลบ
   const handleDeleteTrip = (id: number, trainId: number) => {
     Alert.alert('ยืนยันการลบ', 'ลบแล้วข้อมูลจะหายไปจากระบบทันที แน่ใจหรือไม่?', [
       { text: 'ยกเลิก', style: 'cancel' },
-      { 
-        text: 'ลบเลย', 
-        style: 'destructive',
-        onPress: async () => {
+      { text: 'ลบเลย', style: 'destructive', onPress: async () => {
           await supabase.from('trips').delete().eq('id', id);
           await supabase.from('trains').delete().eq('id', trainId);
           fetchTrips();
@@ -145,226 +115,236 @@ export default function AdminTripsScreen() {
     ]);
   };
 
-  const renderTripCard = ({ item }: { item: any }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.badge}><Text style={styles.badgeText}>{item.departure_date}</Text></View>
-        <View style={[styles.statusBadge, item.status === 'Cancelled' && {backgroundColor: '#FFEBEE'}]}>
-          <Text style={[styles.statusText, item.status === 'Cancelled' && {color: '#D32F2F'}]}>{item.status}</Text>
-        </View>
-      </View>
-      
-      <View style={styles.cardBody}>
-        <View style={{flex: 1}}>
-          <Text style={styles.trainName}>
-            {item.trains?.origin?.station_name || 'ไม่ระบุ'} ➔ {item.trains?.dest?.station_name || 'ไม่ระบุ'}
-          </Text>
-          <Text style={styles.trainSub}>
-            ขบวน {item.trains?.train_number} ({item.trains?.type})
-          </Text>
-          <Text style={styles.timeText}>เวลา: {item.trains?.departure_time?.substring(0,5)} - {item.trains?.arrival_time?.substring(0,5)}</Text>
-          <Text style={styles.seatText}>ที่นั่งว่าง: {item.available_seats}</Text>
-        </View>
-        <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDeleteTrip(item.id, item.trains?.id)}>
-          <Ionicons name="trash-outline" size={20} color="#FF5252" />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  // 🚀 ฟังก์ชันเช็คสถานะการเดินทางแบบฉลาด (Check if Trip Date is past)
+  const getDisplayStatus = (item: any) => {
+    const tripDate = new Date(item.departure_date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // ตั้งเวลาเป็นเที่ยงคืนเพื่อเทียบแค่วันที่
+
+    // ถ้าวันที่เดินทางผ่านมาแล้ว
+    if (tripDate < today) {
+      return { label: 'สิ้นสุดการเดินทาง', bg: '#F5F5F5', color: '#9E9E9E' };
+    }
+
+    // ถ้ายังไม่ถึงวันเดินทาง เช็คตามสถานะในเบส
+    if (item.status === 'Scheduled') {
+      return { label: 'เปิดจอง', bg: '#E8F5E9', color: '#4CAF50' };
+    } else if (item.status === 'Full') {
+      return { label: 'เต็มแล้ว', bg: '#FFEBEE', color: '#F44336' };
+    }
+    
+    return { label: 'ปิดแล้ว', bg: '#ECEFF1', color: '#607D8B' };
+  };
+
+  const getLineBadgeStyle = (province: string) => {
+    if (province === 'กรุงเทพมหานคร' || province === 'ปทุมธานี') return { bg: '#FFF3E0', text: '#FF9800', label: 'สายกลาง' };
+    if (province === 'เชียงใหม่' || province === 'พิษณุโลก' || province === 'พระนครศรีอยุธยา' || province === 'นครสวรรค์') return { bg: '#F5F5F5', text: '#757575', label: 'สายเหนือ' };
+    if (province === 'นครราชสีมา') return { bg: '#F3E5F5', text: '#9C27B0', label: 'สายตะวันออกเฉียงเหนือ' };
+    return { bg: '#E8F5E9', text: '#4CAF50', label: 'สายใต้' };
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* 👑 Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#FFF" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>จัดการรอบรถ (Trips)</Text>
-        <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.addBtn}>
-          <Ionicons name="add" size={24} color="#FFF" />
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      <View style={styles.headerBg}><View style={styles.headerCurve} /></View>
+      <SafeAreaView edges={['top']} style={{ zIndex: 10 }}>
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}>
+            <Ionicons name="chevron-back" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <View style={{flex: 1, marginLeft: 15}}>
+            <Text style={styles.headerTitle}>จัดการรอบเที่ยว (Trips)</Text>
+            <Text style={styles.headerSub}>เพิ่ม แก้ไข และลบรอบเที่ยวรถไฟ</Text>
+          </View>
+        </View>
+      </SafeAreaView>
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#FF9800" style={{marginTop: 50}} />
-      ) : (
-        <FlatList
-          data={trips}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContent}
-          renderItem={renderTripCard}
-          ListEmptyComponent={<Text style={styles.emptyText}>ยังไม่มีข้อมูลรอบรถในระบบ</Text>}
-        />
-      )}
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={{alignItems: 'flex-end', marginBottom: 20}}>
+          <TouchableOpacity style={styles.addBtnMain} onPress={() => setModalVisible(true)}>
+             <Ionicons name="add" size={18} color="#FFF" />
+             <Text style={styles.addBtnText}>เพิ่มรอบเที่ยวใหม่</Text>
+          </TouchableOpacity>
+        </View>
 
-      {/* 📝 Modal ฟอร์มหลัก */}
+        <View style={styles.tableCard}>
+           <View style={styles.tableTh}>
+              <Text style={[styles.thText, {flex: 1}]}>วันที่</Text>
+              <Text style={[styles.thText, {flex: 2.5}]}>เส้นทาง</Text>
+              <Text style={[styles.thText, {flex: 1.5, textAlign: 'center'}]}>สถานะ</Text>
+              <Text style={[styles.thText, {flex: 1, textAlign: 'center'}]}>จัดการ</Text>
+           </View>
+
+           {loading ? <ActivityIndicator color="#5E35B1" style={{margin: 20}} /> : (
+              <View>
+                {trips.map((item) => {
+                  const d = new Date(item.departure_date);
+                  const statusUI = getDisplayStatus(item); // 🚀 ดึงสถานะที่คำนวณแล้ว
+                  return (
+                    <View key={item.id} style={styles.tableRow}>
+                      <View style={styles.dateCol}>
+                        <View style={styles.dateBadge}>
+                          <Text style={styles.dateBadgeText}>{d.getDate()}{'\n'}{['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][d.getMonth()]}</Text>
+                        </View>
+                      </View>
+                      <View style={{flex: 2.5}}>
+                        <Text style={styles.routeText} numberOfLines={1}>{item.trains?.origin?.station_name} ➔ {item.trains?.dest?.station_name}</Text>
+                        <Text style={styles.trainSubText}>{item.trains?.type}</Text>
+                      </View>
+                      <View style={{flex: 1.5, alignItems: 'center'}}>
+                        {/* 🚀 ปรับสีป้ายสถานะตามวันเวลาที่คำนวณ */}
+                        <View style={[styles.statusPill, {backgroundColor: statusUI.bg}]}>
+                           <Text style={[styles.statusPillText, {color: statusUI.color}]}>
+                             {statusUI.label}
+                           </Text>
+                        </View>
+                      </View>
+                      <View style={{flex: 1, flexDirection: 'row', justifyContent: 'center'}}>
+                         <TouchableOpacity onPress={() => handleDeleteTrip(item.id, item.trains?.id)}><Ionicons name="trash-outline" size={18} color="#F44336" /></TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+           )}
+        </View>
+      </ScrollView>
+
+      {/* 📝 Modal ฟอร์ม */}
       <Modal visible={isModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            
-            {/* 📍 ถ้ากำลังเลือกสถานี ให้โชว์หน้าค้นหาสถานีแบบจัดเต็ม! */}
             {selectingStation ? (
-              <View style={{flex: 1}}>
-                <View style={styles.modalHeader}>
-                  <TouchableOpacity onPress={() => {setSelectingStation(null); setSearchQuery('');}}>
-                    <Ionicons name="chevron-back" size={28} color="#FFF" />
-                  </TouchableOpacity>
-                  <View style={styles.modalSearchBox}>
-                    <Ionicons name="search" size={20} color="#9E9E9E" />
-                    <TextInput 
-                      style={styles.modalSearchInput} 
-                      placeholder={`ค้นหา${selectingStation === 'origin' ? 'ต้นทาง' : 'ปลายทาง'}...`} 
-                      placeholderTextColor="#9E9E9E" 
-                      onChangeText={setSearchQuery} 
-                      autoFocus
-                    />
+               <View style={{flex: 1, backgroundColor: '#F4F6F9', borderRadius: 30, overflow: 'hidden'}}>
+                  <View style={styles.stationHeaderContainer}>
+                    <View style={styles.stationHeaderInner}>
+                        <TouchableOpacity onPress={() => setSelectingStation(null)} style={styles.modalBackBtn}><Ionicons name="chevron-back" size={24} color="#FFF" /></TouchableOpacity>
+                        <Text style={styles.modalHeaderText}>เลือกสถานี</Text><View style={{width: 40}} />
+                    </View>
+                    <View style={styles.searchBarWrapper}>
+                        <Ionicons name="search" size={20} color="#9E9E9E" style={{marginLeft: 15}} />
+                        <TextInput placeholder="ค้นหาสถานี..." style={styles.stationSearchInput} onChangeText={setSearchQuery} autoFocus />
+                    </View>
                   </View>
-                </View>
-
-                {/* Timeline UI ดึงมาจาก book-ticket แต่งให้เข้ากับ Dark Mode */}
-                <View style={styles.timelineWrapper}>
-                  <View style={styles.blackLine} />
                   <FlatList 
-                    data={stations.filter(s => s.station_name.includes(searchQuery) || (s.province && s.province.includes(searchQuery)))}
-                    keyExtractor={(s) => s.id.toString()}
-                    showsVerticalScrollIndicator={false}
-                    renderItem={({item}) => (
-                      <TouchableOpacity style={styles.timelineItem} onPress={() => {
-                        if (selectingStation === 'origin') { setOriginId(item.id); setOriginName(item.station_name); }
-                        else { setDestId(item.id); setDestName(item.station_name); }
-                        setSelectingStation(null);
-                        setSearchQuery(''); // รีเซ็ตคำค้นหา
-                      }}>
-                        <View style={styles.nodeWrapper}>
-                          <View style={styles.nodeBox}><Ionicons name="train" size={16} color="#5E35B1" /></View>
-                          <View style={styles.nodeLink} />
-                        </View>
-                        <View style={{marginLeft: 25}}>
-                          <Text style={{color: '#FFF', fontSize: 16, fontWeight: 'bold'}}>{item.station_name}</Text>
-                          <Text style={{color: '#AAA', fontSize: 12, marginTop: 2}}>{item.province}</Text>
-                        </View>
-                      </TouchableOpacity>
-                    )}
+                    data={stations.filter(s => s.station_name.includes(searchQuery))}
+                    contentContainerStyle={{paddingHorizontal: 20, paddingBottom: 30}}
+                    renderItem={({item}) => {
+                       const line = getLineBadgeStyle(item.province);
+                       return (
+                         <TouchableOpacity style={styles.newStationCard} onPress={() => {
+                            if (selectingStation === 'origin') { setOriginId(item.id); setOriginName(item.station_name); }
+                            else { setDestId(item.id); setDestName(item.station_name); }
+                            setSelectingStation(null);
+                         }}>
+                            <View style={[styles.stationIconBox, {backgroundColor: line.bg}]}><Ionicons name="train" size={20} color={line.text} /></View>
+                            <View style={{flex: 1, marginLeft: 15}}><Text style={styles.newStationTitle}>{item.station_name}</Text><Text style={styles.newStationSub}>{item.province}</Text></View>
+                            <View style={[styles.lineBadge, {backgroundColor: line.bg}]}><Text style={[styles.lineBadgeText, {color: line.text}]}>{line.label}</Text></View>
+                         </TouchableOpacity>
+                       );
+                    }}
                   />
-                </View>
-              </View>
+               </View>
             ) : (
-              /* 📝 ถ้าไม่ได้เลือกสถานี ให้โชว์ฟอร์มกรอกข้อมูลตามปกติ */
               <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>สร้างรอบรถใหม่</Text>
-                  <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close" size={24} color="#FFF" /></TouchableOpacity>
-                </View>
-
-                <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-                  <View style={{flex: 1, marginRight: 10}}>
-                    <Text style={styles.label}>ขบวนที่ (เช่น 9)</Text>
-                    <TextInput style={styles.input} value={trainNumber} onChangeText={setTrainNumber} placeholderTextColor="#9E9E9E" keyboardType="number-pad"/>
-                  </View>
-                  <View style={{flex: 1}}>
-                    <Text style={styles.label}>วันที่ (YYYY-MM-DD)</Text>
-                    <TextInput style={styles.input} value={depDate} onChangeText={setDepDate} placeholderTextColor="#9E9E9E" />
-                  </View>
-                </View>
+                <View style={styles.modalHeader}><View><Text style={styles.modalTitle}>สร้างรอบเที่ยวใหม่</Text><Text style={styles.modalSub}>เลือกประเภทรถและกำหนดวันเดินทาง</Text></View><TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#E0E0E0" /></TouchableOpacity></View>
 
                 <Text style={styles.label}>ประเภทรถ</Text>
-                <View style={{flexDirection: 'row', marginBottom: 15}}>
-                  {['รถเร็ว', 'รถด่วนพิเศษ'].map((t) => (
-                    <TouchableOpacity key={t} style={[styles.statusOption, trainType === t && styles.statusOptionActive]} onPress={() => setTrainType(t)}>
-                      <Text style={[styles.statusOptionText, trainType === t && {color: '#FFF'}]}>{t}</Text>
-                    </TouchableOpacity>
-                  ))}
+                <View style={styles.typeSelectorRow}>
+                   <TouchableOpacity style={[styles.typeBtn, trainType === 'รถเร็ว' && styles.typeBtnActive]} onPress={() => setTrainType('รถเร็ว')}>
+                      <Text style={[styles.typeBtnText, trainType === 'รถเร็ว' && {color: '#FFF'}]}>รถเร็ว</Text>
+                   </TouchableOpacity>
+                   <TouchableOpacity style={[styles.typeBtn, trainType === 'รถด่วนพิเศษ' && styles.typeBtnActive]} onPress={() => setTrainType('รถด่วนพิเศษ')}>
+                      <Text style={[styles.typeBtnText, trainType === 'รถด่วนพิเศษ' && {color: '#FFF'}]}>รถด่วนพิเศษ</Text>
+                   </TouchableOpacity>
+                </View>
+
+                <View style={styles.rowGrid}>
+                   <View style={[styles.colHalf, {width: '100%'}]}><Text style={styles.label}>วันที่วิ่ง</Text><TextInput style={styles.input} value={depDate} onChangeText={setDepDate} /></View>
                 </View>
 
                 <Text style={styles.label}>เส้นทาง</Text>
                 <TouchableOpacity style={styles.selectBox} onPress={() => setSelectingStation('origin')}>
-                  <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                    <Ionicons name="location-outline" size={20} color={originId ? '#4CAF50' : '#9E9E9E'} style={{marginRight: 10}}/>
-                    <Text style={{color: originId ? '#FFF' : '#9E9E9E', fontSize: 16}}>{originName}</Text>
-                  </View>
+                   <View style={styles.dotPurple} /><Text style={{color: originId ? '#333' : '#BDBDBD'}}>{originName}</Text>
                 </TouchableOpacity>
-                <View style={{alignItems: 'center', marginVertical: -10, zIndex: 1}}>
-                  <View style={{width: 30, height: 30, borderRadius: 15, backgroundColor: '#3A3C59', justifyContent: 'center', alignItems: 'center'}}>
-                    <Ionicons name="arrow-down" size={16} color="#FFF" />
-                  </View>
-                </View>
                 <TouchableOpacity style={styles.selectBox} onPress={() => setSelectingStation('dest')}>
-                  <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                    <Ionicons name="location" size={20} color={destId ? '#F44336' : '#9E9E9E'} style={{marginRight: 10}}/>
-                    <Text style={{color: destId ? '#FFF' : '#9E9E9E', fontSize: 16}}>{destName}</Text>
-                  </View>
+                   <View style={styles.dotLightPurple} /><Text style={{color: destId ? '#333' : '#BDBDBD'}}>{destName}</Text>
                 </TouchableOpacity>
 
-                <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 10}}>
-                  <View style={{flex: 1, marginRight: 10}}>
-                    <Text style={styles.label}>เวลาออก (HH:MM)</Text>
-                    <TextInput style={styles.input} value={depTime} onChangeText={setDepTime} placeholderTextColor="#9E9E9E" />
-                  </View>
-                  <View style={{flex: 1}}>
-                    <Text style={styles.label}>เวลาถึง (HH:MM)</Text>
-                    <TextInput style={styles.input} value={arrTime} onChangeText={setArrTime} placeholderTextColor="#9E9E9E" />
-                  </View>
+                <View style={styles.rowGrid}>
+                   <View style={styles.colHalf}><Text style={styles.label}>เวลาออก</Text><TextInput style={styles.input} value={depTime} onChangeText={setDepTime} /></View>
+                   <View style={styles.colHalf}><Text style={styles.label}>เวลาถึง</Text><TextInput style={styles.input} value={arrTime} onChangeText={setArrTime} /></View>
                 </View>
 
-                <TouchableOpacity style={styles.saveBtn} onPress={handleAddTrip}>
-                  <Text style={styles.saveBtnText}>บันทึกรอบรถ</Text>
-                </TouchableOpacity>
+                <View style={styles.rowGrid}>
+                   <View style={[styles.colHalf, {width: '100%'}]}><Text style={styles.label}>จำนวนที่นั่ง</Text><TextInput style={styles.input} value={seats} onChangeText={setSeats} keyboardType="numeric" /></View>
+                </View>
+
+                <View style={styles.modalActions}>
+                   <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}><Text style={styles.cancelBtnText}>ยกเลิก</Text></TouchableOpacity>
+                   <TouchableOpacity style={styles.saveBtn} onPress={handleAddTrip}><Ionicons name="checkmark" size={18} color="#FFF" /><Text style={styles.saveBtnText}>บันทึกรอบเที่ยว</Text></TouchableOpacity>
+                </View>
               </ScrollView>
             )}
-
           </View>
         </View>
       </Modal>
-
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1C1E36' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: '#F4F6F9' },
+  headerBg: { backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, height: 180, position: 'absolute', top: 0, left: 0, right: 0 },
+  headerCurve: { position: 'absolute', top: -50, right: -50, width: 250, height: 250, borderRadius: 125, backgroundColor: 'rgba(255,255,255,0.05)' },
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10 },
+  backBtnCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  addBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', elevation: 5 },
-  listContent: { padding: 20, paddingBottom: 100 },
-  
-  card: { backgroundColor: '#2A2C49', borderRadius: 15, padding: 15, marginBottom: 15, elevation: 3 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  badge: { backgroundColor: '#5E35B1', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  badgeText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
-  statusBadge: { backgroundColor: '#E8F5E9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  statusText: { color: '#2E7D32', fontSize: 12, fontWeight: 'bold' },
-  cardBody: { flexDirection: 'row', alignItems: 'center' },
-  trainName: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 2 },
-  trainSub: { color: '#AAA', fontSize: 12, marginBottom: 8 },
-  timeText: { color: '#FF9800', fontSize: 12, marginBottom: 4 },
-  seatText: { color: '#4CAF50', fontSize: 12 },
-  deleteBtn: { padding: 10, backgroundColor: 'rgba(255,82,82,0.1)', borderRadius: 10 },
-  emptyText: { color: '#757575', textAlign: 'center', marginTop: 50, fontSize: 16 },
-
-  // Modal Styles
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#2A2C49', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 25, flex: 1, marginTop: 50 }, // ให้ Modal สูงขึ้นเพื่อพอดีกับลิสต์สถานี
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  label: { color: '#AAA', fontSize: 12, marginBottom: 8, marginTop: 10 },
-  input: { backgroundColor: '#1C1E36', color: '#FFF', height: 50, borderRadius: 10, paddingHorizontal: 15, borderWidth: 1, borderColor: '#3A3C59', marginBottom: 5 },
-  selectBox: { backgroundColor: '#1C1E36', height: 55, borderRadius: 10, paddingHorizontal: 15, borderWidth: 1, borderColor: '#3A3C59', justifyContent: 'center' },
-  
-  statusOption: { flex: 1, backgroundColor: '#1C1E36', height: 45, justifyContent: 'center', alignItems: 'center', marginHorizontal: 3, borderRadius: 10, borderWidth: 1, borderColor: '#3A3C59' },
-  statusOptionActive: { backgroundColor: '#FF9800', borderColor: '#FF9800' },
-  statusOptionText: { color: '#AAA', fontSize: 14, fontWeight: 'bold' },
-
-  saveBtn: { backgroundColor: '#4CAF50', height: 55, borderRadius: 15, justifyContent: 'center', alignItems: 'center', marginTop: 30, marginBottom: 20 },
-  saveBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-
-  // --- Styles สำหรับหน้าค้นหาสถานี (ดึงจาก book-ticket.tsx มาปรับสี) ---
-  modalSearchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1E36', borderRadius: 20, paddingHorizontal: 15, height: 45, marginLeft: 10, borderWidth: 1, borderColor: '#3A3C59' },
-  modalSearchInput: { flex: 1, marginLeft: 10, color: '#FFF' },
-  timelineWrapper: { flex: 1, paddingLeft: 20, marginTop: 10 },
-  blackLine: { position: 'absolute', left: 35, top: 0, bottom: 0, width: 4, backgroundColor: '#5E35B1' },
-  timelineItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 25 },
-  nodeWrapper: { width: 36, alignItems: 'center' },
-  nodeBox: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#1C1E36', borderWidth: 2, borderColor: '#5E35B1', justifyContent: 'center', alignItems: 'center', zIndex: 1 },
-  nodeLink: { width: 15, height: 3, backgroundColor: '#5E35B1', position: 'absolute', right: -15, top: 13 },
+  headerSub: { color: '#B0B2C3', fontSize: 12, marginTop: 2 },
+  scrollContent: { padding: 20, paddingTop: 90, paddingBottom: 50 },
+  addBtnMain: { flexDirection: 'row', backgroundColor: '#5E35B1', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 20, alignItems: 'center', elevation: 3 },
+  addBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 5 },
+  tableCard: { backgroundColor: '#FFF', borderRadius: 25, padding: 15, elevation: 4 },
+  tableTh: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#EEE', paddingBottom: 10, marginBottom: 10 },
+  thText: { fontSize: 10, color: '#9E9E9E', fontWeight: 'bold' },
+  tableRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F9F9F9', paddingVertical: 12 },
+  dateCol: { flex: 1 },
+  dateBadge: { backgroundColor: '#EBE4FF', padding: 5, borderRadius: 8, alignItems: 'center' },
+  dateBadgeText: { color: '#5E35B1', fontSize: 9, fontWeight: 'bold', textAlign: 'center' },
+  routeText: { fontSize: 11, fontWeight: 'bold', color: '#333' },
+  trainSubText: { fontSize: 9, color: '#9E9E9E' },
+  statusPill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
+  statusPillText: { fontSize: 9, fontWeight: 'bold' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 0, height: '92%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 25, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+  modalSub: { fontSize: 12, color: '#9E9E9E' },
+  rowGrid: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 25, marginTop: 15 },
+  colHalf: { width: '48%' },
+  label: { fontSize: 12, fontWeight: 'bold', color: '#333', marginBottom: 8, marginLeft: 25, marginTop: 15 },
+  input: { backgroundColor: '#F8F9FA', borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12, padding: 12, fontSize: 13 },
+  selectBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FA', borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12, padding: 15, marginHorizontal: 25, marginBottom: 10 },
+  dotPurple: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#5E35B1', marginRight: 10 },
+  dotLightPurple: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D1C4E9', marginRight: 10 },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', padding: 25, marginTop: 10 },
+  cancelBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E0E0E0', marginRight: 10 },
+  cancelBtnText: { color: '#757575', fontWeight: 'bold' },
+  saveBtn: { flexDirection: 'row', backgroundColor: '#5E35B1', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  saveBtnText: { color: '#FFF', fontWeight: 'bold', marginLeft: 5 },
+  typeSelectorRow: { flexDirection: 'row', paddingHorizontal: 25, marginBottom: 5 },
+  typeBtn: { flex: 1, backgroundColor: '#F8F9FA', borderWidth: 1, borderColor: '#E0E0E0', paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginHorizontal: 5 },
+  typeBtnActive: { backgroundColor: '#FF9800', borderColor: '#FF9800' },
+  typeBtnText: { color: '#757575', fontWeight: 'bold', fontSize: 14 },
+  stationHeaderContainer: { backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, paddingBottom: 25 },
+  stationHeaderInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20 },
+  modalBackBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  modalHeaderText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  searchBarWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', marginHorizontal: 25, marginTop: 20, borderRadius: 25, height: 45 },
+  stationSearchInput: { flex: 1, marginLeft: 10, fontSize: 14 },
+  newStationCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 15, borderRadius: 20, marginBottom: 12, elevation: 1 },
+  stationIconBox: { width: 45, height: 45, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  newStationTitle: { fontSize: 15, fontWeight: 'bold', color: '#333' },
+  newStationSub: { fontSize: 11, color: '#9E9E9E', marginTop: 2 },
+  lineBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  lineBadgeText: { fontSize: 10, fontWeight: 'bold' },
 });

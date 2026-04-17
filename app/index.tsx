@@ -12,7 +12,6 @@ export default function HomeScreen() {
   const [userRole, setUserRole] = useState('user');
   const [fullName, setFullName] = useState('');
   
-  // 📌 สร้าง Object เก็บรูปตาม Slot Name
   const [bannerSlots, setBannerSlots] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -47,58 +46,59 @@ export default function HomeScreen() {
     }
   };
 
-  // ✅ ใช้ Math.round เพื่อให้จุดไข่ปลาเปลี่ยนตรงจังหวะแม่นๆ
   const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const slide = Math.round(event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width);
     if (slide !== activeSlide) setActiveSlide(slide);
   };
 
-  // เช็คเวลาเพื่อเปลี่ยนคำทักทาย
   const currentHour = new Date().getHours();
   const greetingText = currentHour < 12 ? 'สวัสดีตอนเช้า☀️' : currentHour < 18 ? 'สวัสดีตอนบ่าย🌤️' : 'สวัสดีตอนเย็น🌙';
 
-  // 📌 บังคับสร้าง Array 3 ช่อง เพื่อให้สไลเดอร์เลื่อนได้ตลอดเวลา แม้จะไม่มีรูปก็ตาม!
   const sliderSlots = ['slider_1', 'slider_2', 'slider_3'];
 
   return (
     <View style={styles.mainContainer}>
       
-      {/* 🚀 ใช้ ScrollView คลุมทั้งหมด เพื่อให้ Header เลื่อนตามไปได้สวยๆ ไม่โดนตัด */}
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         
-        {/* 🌊 Header สีน้ำเงินเข้ม (ดีไซน์โค้งมน มีวงกลมซ้อน) */}
+        {/* 🌊 Header สีน้ำเงินเข้ม */}
         <View style={styles.blueHeaderBg}>
-          {/* วงกลมตกแต่งด้านหลัง (Graphic) */}
           <View style={styles.headerGraphicCircle} />
           
           <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
-            <View style={styles.greetingContainer}>
-              <Text style={styles.greetingSub}>{greetingText}</Text>
-              <Text style={styles.greetingName}>คุณ{fullName || 'ผู้โดยสาร'}</Text>
-            </View>
+            
+            {/* 🛡️ แถวบน: ชื่อผู้ใช้ + โล่แอดมินดีไซน์พรีเมียม */}
+            <View style={styles.headerTopRow}>
+              <View style={styles.greetingContainer}>
+                <Text style={styles.greetingSub}>{greetingText}</Text>
+                <Text style={styles.greetingName}>คุณ{fullName || 'ผู้โดยสาร'}</Text>
+              </View>
 
-            {/* ช่องค้นหาโปร่งแสง */}
-            <View style={styles.searchBox}>
-              <Ionicons name="search-outline" size={20} color="#fff5f5" />
-              <TextInput 
-                style={styles.searchInput} 
-                placeholder="" 
-                placeholderTextColor="#333" 
-              />
-              {userRole === 'admin' ? (
-                <TouchableOpacity onPress={() => router.push('/admin')}>
-                  <Ionicons name="settings" size={20} color="#ffffff" />
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity>
-                  <Ionicons name="settings-outline" size={20} color="#333" />
+              {/* 🚀 ปุ่มโล่แอดมินแบบ Glassmorphism (เฉพาะ Admin) */}
+              {userRole === 'admin' && (
+                <TouchableOpacity 
+                  style={styles.adminShieldBtn} 
+                  onPress={() => router.push('/admin')}
+                >
+                  <MaterialCommunityIcons name="shield-check" size={28} color="#FFD700" />
+                  <View style={styles.adminStatusDot} />
                 </TouchableOpacity>
               )}
+            </View>
+
+            {/* 🔍 ช่องค้นหาคลีนๆ (ลบฟันเฟืองออกแล้ว) */}
+            <View style={styles.searchBox}>
+              <Ionicons name="search-outline" size={20} color="rgba(255,255,255,0.6)" />
+              <TextInput 
+                style={styles.searchInput} 
+                placeholder="ค้นหาข้อมูลเส้นทาง..." 
+                placeholderTextColor="rgba(255,255,255,0.4)" 
+              />
             </View>
           </SafeAreaView>
         </View>
 
-        {/* 📰 แบนเนอร์สไลเดอร์ 3 รูป (ดันขึ้นไปทับ Header ด้วย marginTop ติดลบ) */}
+        {/* 📰 แบนเนอร์สไลเดอร์ */}
         <View style={styles.bannerWrapper}>
           <ScrollView 
             horizontal 
@@ -107,14 +107,13 @@ export default function HomeScreen() {
             onScroll={onScroll} 
             scrollEventThrottle={16}
           >
-            {/* ✅ ลูปสร้าง 3 หน้าเสมอ แก้บั๊กเลื่อนไม่ได้! */}
             {sliderSlots.map((slot, index) => (
               <View key={slot} style={styles.bannerSlide}>
                 {bannerSlots[slot] ? (
                   <Image source={{ uri: bannerSlots[slot] }} style={styles.bannerImage} />
                 ) : (
                   <View style={styles.bannerPlaceholder}>
-                    <Text style={styles.placeholderText}>ข่าวสาร {index + 1}</Text>
+                    <Text style={styles.placeholderText}>RailGo News {index + 1}</Text>
                   </View>
                 )}
               </View>
@@ -128,7 +127,7 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* 🎛️ เมนูด่วน (Quick Menu) */}
+        {/* 🎛️ เมนูด่วน */}
         <View style={styles.quickMenuSection}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>เมนูด่วน</Text>
@@ -159,7 +158,7 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* 🖼️ Grid รูปภาพด้านล่าง (ปรับเป็น 2 กล่องแนวตั้งตามเรฟเฟอเรนซ์) */}
+        {/* 🖼️ Grid รูปภาพ 2 ช่องตั้งตามดีไซน์ใหม่ */}
         <View style={styles.gridContainer}>
           <View style={styles.gridBox}>
             {bannerSlots['grid_left_top'] && <Image source={{ uri: bannerSlots['grid_left_top'] }} style={styles.gridImageFull} />}
@@ -171,7 +170,7 @@ export default function HomeScreen() {
 
       </ScrollView>
 
-      {/* 📲 Bottom Navigation Bar (ปรับสีไอคอน Active ให้เป๊ะตามรูป) */}
+      {/* 📲 Bottom Navigation Bar */}
       <View style={styles.bottomNavBar}>
         <TouchableOpacity style={styles.navItem}>
           <Ionicons name="home" size={24} color="#5E35B1" />
@@ -195,21 +194,18 @@ export default function HomeScreen() {
   );
 }
 
-// 📐 ปรับสไตล์ให้เป๊ะตามภาพที่สุด!
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F9F9F9' },
   scrollContent: { paddingBottom: 110 }, 
   
-  // 🌊 Header สีน้ำเงินเข้ม
   blueHeaderBg: { 
-    backgroundColor: '#262956', // สีน้ำเงินเข้มตามเรฟ
+    backgroundColor: '#262956', 
     borderBottomLeftRadius: 40, 
     borderBottomRightRadius: 40, 
-    paddingBottom: 90, // เผื่อพื้นที่ให้แบนเนอร์มาทับ
+    paddingBottom: 90, 
     position: 'relative',
     overflow: 'hidden'
   },
-  // Graphic วงกลมสว่างๆ ด้านขวาของ Header
   headerGraphicCircle: {
     position: 'absolute',
     right: -50,
@@ -217,53 +213,85 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: '#2E3166', // สีสว่างขึ้นมานิดนึง
+    backgroundColor: '#2E3166',
   },
-  headerSafeArea: { paddingHorizontal: 25, paddingTop: 20 },
+  headerSafeArea: { paddingHorizontal: 25, paddingTop: 10 },
   
-  greetingContainer: { marginBottom: 25, marginTop: 10 },
-  greetingSub: { fontSize: 14, color: '#D1C4E9', marginBottom: 5 },
+  headerTopRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center',
+    marginBottom: 20 
+  },
+  greetingContainer: { flex: 1 },
+  greetingSub: { fontSize: 14, color: '#D1C4E9', marginBottom: 2 },
   greetingName: { fontSize: 22, fontWeight: 'bold', color: '#FFF' },
+
+  // 🛡️ สไตล์โล่แอดมินแบบพรีเมียม
+  adminShieldBtn: { 
+    width: 48, 
+    height: 48, 
+    borderRadius: 16, 
+    backgroundColor: 'rgba(255, 255, 255, 0.12)', 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 215, 0, 0.35)', 
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  adminStatusDot: { 
+    position: 'absolute', 
+    bottom: -1, 
+    right: -1, 
+    width: 12, 
+    height: 12, 
+    borderRadius: 6, 
+    backgroundColor: '#4CAF50', 
+    borderWidth: 2,
+    borderColor: '#262956'
+  },
 
   searchBox: { 
     flexDirection: 'row', 
     alignItems: 'center', 
-    backgroundColor: 'rgba(255, 255, 255, 0.15)', 
+    backgroundColor: 'rgba(255, 255, 255, 0.12)', 
     borderRadius: 20, 
     paddingHorizontal: 15, 
     height: 45,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)'
+    borderColor: 'rgba(255, 255, 255, 0.08)'
   },
   searchInput: { flex: 1, marginHorizontal: 10, fontSize: 14, color: '#FFF' },
   
-  // 📰 แบนเนอร์ (ทับ Header ด้วย marginTop ติดลบ)
   bannerWrapper: { 
-    marginTop: -70, // 📌 ดันขึ้นไปทับ Header
+    marginTop: -60, 
     marginHorizontal: 20, 
     height: 220, 
     borderRadius: 25, 
     backgroundColor: '#FFF', 
     overflow: 'hidden', 
     marginBottom: 30, 
-    elevation: 3, 
+    elevation: 4, 
     shadowColor: '#000', 
     shadowOffset: { width: 0, height: 2 }, 
     shadowOpacity: 0.1, 
-    shadowRadius: 4,
+    shadowRadius: 5,
     borderWidth: 1,
     borderColor: '#EEEEEE'
   },
-  bannerSlide: { width: width - 40, height: 220 }, // บังคับความกว้างให้พอดี 1 หน้าจอเป๊ะ
+  bannerSlide: { width: width - 40, height: 220 },
   bannerImage: { width: '100%', height: '100%' },
   bannerPlaceholder: { width: '100%', height: '100%', backgroundColor: '#FAFAFA', justifyContent: 'center', alignItems: 'center' },
-  placeholderText: { fontSize: 36, color: '#E0E0E0', fontWeight: '300' },
+  placeholderText: { fontSize: 24, color: '#E0E0E0', fontWeight: 'bold' },
   
   paginationDots: { position: 'absolute', bottom: 15, alignSelf: 'center', flexDirection: 'row' },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#E0E0E0', marginHorizontal: 4 },
-  activeDot: { backgroundColor: '#BDBDBD' }, // สีเทาเข้มตามเรฟ
+  activeDot: { backgroundColor: '#BDBDBD' },
   
-  // 🎛️ เมนูด่วน
   quickMenuSection: { paddingHorizontal: 25, marginBottom: 30 },
   sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginRight: 15 },
@@ -272,14 +300,12 @@ const styles = StyleSheet.create({
   menuRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15 },
   menuItem: { alignItems: 'center', width: '30%' },
   menuIconSquare: { width: 65, height: 65, borderRadius: 15, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  menuText: { fontSize: 12, color: '#333', textAlign: 'center' },
+  menuText: { fontSize: 12, color: '#333', textAlign: 'center', fontWeight: '500' },
 
-  // 🖼️ Grid รูปภาพด้านล่าง (2 กล่องตั้งๆ)
   gridContainer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20 },
-  gridBox: { width: '48%', height: 200, borderRadius: 25, backgroundColor: '#FFF', overflow: 'hidden', borderWidth: 1, borderColor: '#E0E0E0' },
+  gridBox: { width: '48%', height: 200, borderRadius: 25, backgroundColor: '#FFF', overflow: 'hidden', borderWidth: 1, borderColor: '#E0E0E0', elevation: 1 },
   gridImageFull: { width: '100%', height: '100%' },
 
-  // 📲 Bottom Nav
   bottomNavBar: { position: 'absolute', bottom: 20, left: 20, right: 20, height: 70, backgroundColor: '#FFF', borderRadius: 35, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingHorizontal: 10, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, borderWidth: 1, borderColor: '#F5F5F5' },
   navItem: { alignItems: 'center', justifyContent: 'center' },
   navText: { fontSize: 10, fontWeight: 'bold', color: '#333', marginTop: 4 },

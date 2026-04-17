@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router'; // 📌 เพิ่ม useFocusEffect
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { router, useFocusEffect } from 'expo-router';
 import { supabase } from '../supabase';
 
 export default function AdminCouponsScreen() {
@@ -12,14 +12,20 @@ export default function AdminCouponsScreen() {
   // 🟢 States สำหรับ Modal ฟอร์ม (เพิ่ม/แก้ไข)
   const [isModalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  
+  // ข้อมูลในฟอร์ม
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [code, setCode] = useState('');
+  const [discountType, setDiscountType] = useState('เปอร์เซ็นต์ (%)');
   const [discountAmount, setDiscountAmount] = useState(''); 
+  const [minPrice, setMinPrice] = useState(''); 
+  const [usageLimit, setUsageLimit] = useState(''); 
   const [expDate, setExpDate] = useState('');
   const [color, setColor] = useState('#5E35B1');
 
-  // 🚀 บังคับให้ดึงข้อมูล "ทุกครั้ง" ที่เปิดเข้ามาหน้านี้!
+  const [stats, setStats] = useState({ total: 0, used: 0, savedValue: 0 });
+
   useFocusEffect(
     useCallback(() => {
       fetchCoupons();
@@ -28,15 +34,15 @@ export default function AdminCouponsScreen() {
 
   const fetchCoupons = async () => {
     setLoading(true);
-    // 📌 ดึงข้อมูลดิบๆ มาก่อน แล้วมาเรียงในแอป ชัวร์กว่า!
     const { data, error } = await supabase.from('coupons').select('*');
     
     if (error) {
       Alert.alert('ดึงข้อมูลล้มเหลว', error.message);
     } else if (data) {
-      // เรียงจากคูปองใหม่ไปเก่า
       const sortedData = data.sort((a, b) => b.id - a.id);
       setCoupons(sortedData);
+      // ตัวเลขจำลองการใช้งาน (เบสจริงอาจจะต้อง join กับ bookings)
+      setStats({ total: sortedData.length, used: 2841, savedValue: 284100 }); 
     }
     setLoading(false);
   };
@@ -87,13 +93,16 @@ export default function AdminCouponsScreen() {
     setDiscountAmount(item.discount_amount ? item.discount_amount.toString() : '');
     setExpDate(item.expire_date || '');
     setColor(item.color || '#5E35B1');
+    setMinPrice('500'); // Mock
+    setUsageLimit('500'); // Mock
     setModalVisible(true);
   };
 
   const closeModal = () => {
     setModalVisible(false);
     setEditingId(null);
-    setTitle(''); setDesc(''); setCode(''); setExpDate(''); setDiscountAmount(''); setColor('#5E35B1');
+    setTitle(''); setDesc(''); setCode(''); setExpDate(''); setDiscountAmount(''); 
+    setMinPrice(''); setUsageLimit(''); setColor('#5E35B1');
   };
 
   const handleDeleteCoupon = (id: number) => {
@@ -108,142 +117,287 @@ export default function AdminCouponsScreen() {
     ]);
   };
 
-  const renderCouponCard = ({ item }: { item: any }) => (
-    <View style={styles.card}>
-      <View style={[styles.colorBar, { backgroundColor: item.color || '#5E35B1' }]} />
-      <View style={styles.cardContent}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.couponTitle}>{item.title}</Text>
-          <Text style={styles.couponDesc}>{item.description}</Text>
-          <Text style={{color: '#E91E63', fontWeight: 'bold', marginBottom: 10, fontSize: 12}}>ลดราคา: {item.discount_amount} บาท</Text>
-          <View style={styles.codeRow}>
-            <View style={styles.codeBox}><Text style={[styles.codeText, {color: item.color || '#5E35B1'}]}>{item.code}</Text></View>
-            <Text style={styles.expText}>หมดเขต: {item.expire_date}</Text>
-          </View>
+  const renderCouponRow = ({ item }: { item: any }) => (
+    <View style={styles.tableRow}>
+      <View style={[styles.td, { flex: 2, flexDirection: 'row', alignItems: 'center' }]}>
+        <View style={[styles.iconCircle, { backgroundColor: item.color || '#4CAF50' }]}>
+          <Ionicons name="star" size={12} color="#FFF" />
         </View>
-        
-        {/* 🎛️ ปุ่มจัดการ (แก้ไข & ลบ) โผล่มาแล้ว! */}
-        <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.editBtn} onPress={() => openEditModal(item)}>
-            <Ionicons name="pencil" size={20} color="#2196F3" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDeleteCoupon(item.id)}>
-            <Ionicons name="trash-outline" size={20} color="#FF5252" />
-          </TouchableOpacity>
+        <View style={{ marginLeft: 8, flex: 1 }}>
+          <Text style={styles.couponNameText} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.couponSubText} numberOfLines={1}>{item.description}</Text>
         </View>
+      </View>
+      
+      <View style={[styles.td, { flex: 1.5, justifyContent: 'center', alignItems: 'center' }]}>
+        <View style={[styles.codeBadge, { backgroundColor: item.color || '#5E35B1' }]}>
+          <Text style={styles.codeBadgeText}>{item.code}</Text>
+        </View>
+      </View>
+      
+      <View style={[styles.td, { flex: 1.5, justifyContent: 'center' }]}>
+        <Text style={styles.mainValueText}>{item.discount_amount} บาท</Text>
+        <Text style={styles.subValueText}>ขั้นต่ำ 500</Text>
+      </View>
+
+      <View style={[styles.td, { flex: 1.5, justifyContent: 'center' }]}>
+        <Text style={styles.usageText}>145 / 500</Text>
+        <View style={styles.progressBarBg}>
+          <View style={[styles.progressBarFill, { width: '30%', backgroundColor: item.color || '#4CAF50' }]} />
+        </View>
+      </View>
+
+      <View style={[styles.td, { flex: 1, alignItems: 'center', justifyContent: 'center' }]}>
+        <View style={[styles.statusBadge, { backgroundColor: item.is_active ? '#E8F5E9' : '#FFEBEE' }]}>
+          <Text style={[styles.statusText, { color: item.is_active ? '#4CAF50' : '#F44336' }]}>
+            {item.is_active ? 'ใช้งาน' : 'หมดอายุ'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={[styles.td, { flex: 1, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' }]}>
+        <TouchableOpacity onPress={() => openEditModal(item)} style={styles.actionBtn}>
+          <Ionicons name="pencil" size={14} color="#757575" />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => handleDeleteCoupon(item.id)} style={styles.actionBtn}>
+          <Ionicons name="trash-outline" size={14} color="#757575" />
+        </TouchableOpacity>
       </View>
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#FFF" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>จัดการคูปอง (Coupons)</Text>
-        <TouchableOpacity onPress={() => { closeModal(); setModalVisible(true); }} style={styles.addBtn}>
-          <Ionicons name="add" size={24} color="#FFF" />
-        </TouchableOpacity>
+    <View style={styles.container}>
+      
+      {/* 👑 ฉากหลังสีน้ำเงิน (เอาไว้ด้านหลังสุด) */}
+      <View style={styles.headerBg}>
+        <View style={styles.headerCurve} />
       </View>
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#FF9800" style={{marginTop: 50}} />
-      ) : (
-        <FlatList
-          data={coupons}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContent}
-          renderItem={renderCouponCard}
-          ListEmptyComponent={<Text style={styles.emptyText}>ยังไม่มีคูปองส่วนลดในระบบ</Text>}
-        />
-      )}
+      {/* 👑 Header ปุ่มและข้อความ (ยกระดับ zIndex ให้ลอยอยู่บนสุดเพื่อไม่ให้ปุ่มโดนทับ) */}
+      <SafeAreaView edges={['top']} style={{ zIndex: 10 }}>
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}>
+            <Ionicons name="chevron-back" size={24} color="#FFF" />
+          </TouchableOpacity>
+          
+          <View style={{flex: 1, marginLeft: 15}}>
+            <Text style={styles.headerTitle}>จัดการคูปองส่วนลด</Text>
+            <Text style={styles.headerSub}>เพิ่ม แก้ไข และลบคูปองส่วนลด</Text>
+          </View>
+          {/* ลบตัว A ออกแล้ว */}
+        </View>
+      </SafeAreaView>
 
-      {/* 📝 Modal ฟอร์ม (เพิ่ม/แก้ไข) */}
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        
+        {/* ปุ่มสร้างคูปองใหม่ */}
+        <View style={{ alignItems: 'flex-end', marginBottom: 15 }}>
+          <TouchableOpacity style={styles.createBtn} onPress={() => { closeModal(); setModalVisible(true); }}>
+            <Ionicons name="add" size={16} color="#FFF" />
+            <Text style={styles.createBtnText}>สร้างคูปองใหม่</Text>
+          </TouchableOpacity>
+        </View>
+
+
+        {/* 📋 ตารางรายการคูปอง */}
+        <View style={styles.tableContainer}>
+          <View style={styles.tableHeaderSection}>
+            <Text style={styles.tableTitle}>รายการคูปองทั้งหมด</Text>
+            <View style={styles.filterBox}>
+              <Text style={styles.filterText}>ทุกสถานะ</Text>
+              <Ionicons name="chevron-down" size={14} color="#757575" />
+            </View>
+          </View>
+
+          {/* หัวตาราง */}
+          <View style={styles.thRow}>
+            <Text style={[styles.thText, {flex: 2}]}>คูปอง</Text>
+            <Text style={[styles.thText, {flex: 1.5, textAlign: 'center'}]}>โค้ด</Text>
+            <Text style={[styles.thText, {flex: 1.5, textAlign: 'center'}]}>ส่วนลด</Text>
+            <Text style={[styles.thText, {flex: 1.5, textAlign: 'center'}]}>ใช้ไปแล้ว</Text>
+            <Text style={[styles.thText, {flex: 1, textAlign: 'center'}]}>สถานะ</Text>
+            <Text style={[styles.thText, {flex: 1, textAlign: 'center'}]}>จัดการ</Text>
+          </View>
+
+          {loading ? (
+            <ActivityIndicator size="large" color="#5E35B1" style={{marginVertical: 30}} />
+          ) : (
+            <View style={styles.tbody}>
+              {coupons.length > 0 ? coupons.map(item => (
+                <React.Fragment key={item.id}>
+                  {renderCouponRow({item})}
+                </React.Fragment>
+              )) : <Text style={styles.emptyText}>ไม่มีข้อมูลคูปอง</Text>}
+            </View>
+          )}
+        </View>
+
+      </ScrollView>
+
+      {/* 📝 Modal ฟอร์ม (เพิ่ม/แก้ไข) โทนสว่าง */}
       <Modal visible={isModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.modalHeader}>
+            
+            <View style={styles.modalHeader}>
+              <View>
                 <Text style={styles.modalTitle}>{editingId ? 'แก้ไขคูปอง' : 'สร้างคูปองใหม่'}</Text>
-                <TouchableOpacity onPress={closeModal}><Ionicons name="close" size={24} color="#FFF" /></TouchableOpacity>
+                <Text style={styles.modalSubTitle}>กำหนดเงื่อนไขและส่วนลด</Text>
+              </View>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom: 20}}>
+              
+              <Text style={styles.label}>ชื่อคูปอง (Title)</Text>
+              <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="เช่น โปรสงกรานต์ 2026" placeholderTextColor="#BDBDBD" />
+
+              <Text style={styles.label}>คำอธิบาย (Description)</Text>
+              <TextInput style={[styles.input, styles.textArea]} value={desc} onChangeText={setDesc} placeholder="อธิบายเงื่อนไขการใช้คูปอง..." placeholderTextColor="#BDBDBD" multiline textAlignVertical="top" />
+
+              <View style={styles.rowGrid}>
+                <View style={styles.colHalf}>
+                  <Text style={styles.label}>โค้ด (Code)</Text>
+                  <TextInput style={styles.input} value={code} onChangeText={setCode} placeholder="SONGKRAN30" placeholderTextColor="#BDBDBD" autoCapitalize="characters" />
+                </View>
+                <View style={styles.colHalf}>
+                  <Text style={styles.label}>ประเภทส่วนลด</Text>
+                  <View style={styles.dropdownFake}>
+                    <Text style={{color: '#333'}}>{discountType}</Text>
+                  </View>
+                </View>
               </View>
 
-              <Text style={styles.label}>ชื่อโปรโมชั่น (Title)</Text>
-              <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholderTextColor="#9E9E9E" />
-
-              <Text style={styles.label}>รายละเอียด (Description)</Text>
-              <TextInput style={styles.input} value={desc} onChangeText={setDesc} placeholderTextColor="#9E9E9E" />
-
-              <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-                <View style={{flex: 1, marginRight: 10}}>
-                  <Text style={styles.label}>โค้ดส่วนลด (Code)</Text>
-                  <TextInput style={styles.input} value={code} onChangeText={setCode} placeholderTextColor="#9E9E9E" autoCapitalize="characters" />
+              <View style={styles.rowGrid}>
+                <View style={styles.colHalf}>
+                  <Text style={styles.label}>ส่วนลด</Text>
+                  <TextInput style={styles.input} value={discountAmount} onChangeText={setDiscountAmount} placeholder="30" placeholderTextColor="#BDBDBD" keyboardType="numeric" />
                 </View>
-                <View style={{flex: 1}}>
-                  <Text style={styles.label}>วันหมดเขต</Text>
-                  <TextInput style={styles.input} value={expDate} onChangeText={setExpDate} placeholderTextColor="#9E9E9E" />
+                <View style={styles.colHalf}>
+                  <Text style={styles.label}>ราคาขั้นต่ำ (THB)</Text>
+                  <TextInput style={styles.input} value={minPrice} onChangeText={setMinPrice} placeholder="500" placeholderTextColor="#BDBDBD" keyboardType="numeric" />
                 </View>
               </View>
 
-              <Text style={styles.label}>มูลค่าส่วนลด (บาท)</Text>
-              <TextInput style={styles.input} value={discountAmount} onChangeText={setDiscountAmount} placeholderTextColor="#9E9E9E" keyboardType="numeric" />
+              <View style={styles.rowGrid}>
+                <View style={styles.colHalf}>
+                  <Text style={styles.label}>จำกัดการใช้ (ครั้ง)</Text>
+                  <TextInput style={styles.input} value={usageLimit} onChangeText={setUsageLimit} placeholder="500 (0=ไม่จำกัด)" placeholderTextColor="#BDBDBD" keyboardType="numeric" />
+                </View>
+                <View style={styles.colHalf}>
+                  <Text style={styles.label}>วันหมดอายุ</Text>
+                  <TextInput style={styles.input} value={expDate} onChangeText={setExpDate} placeholder="mm/dd/yyyy" placeholderTextColor="#BDBDBD" />
+                </View>
+              </View>
 
-              <Text style={styles.label}>เลือกสีคูปอง</Text>
+              <Text style={styles.label}>สีไอคอนคูปอง</Text>
               <View style={styles.colorPicker}>
                 {['#5E35B1', '#E91E63', '#4CAF50', '#FF9800', '#2196F3'].map((c) => (
-                  <TouchableOpacity key={c} style={[styles.colorCircle, {backgroundColor: c}, color === c && styles.colorActive]} onPress={() => setColor(c)}>
-                    {color === c && <Ionicons name="checkmark" size={20} color="#FFF" />}
+                  <TouchableOpacity key={c} style={[styles.colorCircle, {backgroundColor: c}]} onPress={() => setColor(c)}>
+                    {color === c && <Ionicons name="checkmark" size={16} color="#FFF" />}
                   </TouchableOpacity>
                 ))}
               </View>
 
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveCoupon}>
-                <Text style={styles.saveBtnText}>{editingId ? 'บันทึกการแก้ไข' : 'บันทึกคูปองใหม่'}</Text>
-              </TouchableOpacity>
+              {/* ปุ่มบันทึก / ยกเลิก */}
+              <View style={styles.modalActionRow}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={closeModal}>
+                  <Text style={styles.cancelBtnText}>ยกเลิก</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSaveCoupon}>
+                  <Ionicons name="checkmark" size={16} color="#FFF" style={{marginRight: 5}}/>
+                  <Text style={styles.saveBtnText}>{editingId ? 'บันทึกแก้ไข' : 'บันทึกคูปอง'}</Text>
+                </TouchableOpacity>
+              </View>
+
             </ScrollView>
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1C1E36' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: '#F4F6F9' },
+  
+  // Header
+  headerBg: { backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, position: 'absolute', top: 0, left: 0, right: 0, height: 200, overflow: 'hidden', zIndex: 0 },
+  headerCurve: { position: 'absolute', top: -50, right: -50, width: 250, height: 250, borderRadius: 125, backgroundColor: 'rgba(255,255,255,0.05)' },
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10 },
+  backBtnCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  addBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', elevation: 5 },
-  listContent: { padding: 20, paddingBottom: 100 },
-  
-  card: { flexDirection: 'row', backgroundColor: '#2A2C49', borderRadius: 15, marginBottom: 15, elevation: 3, overflow: 'hidden' },
-  colorBar: { width: 10, height: '100%' },
-  cardContent: { flex: 1, flexDirection: 'row', padding: 15, alignItems: 'center' },
-  couponTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 5 },
-  couponDesc: { color: '#AAA', fontSize: 12, marginBottom: 5 },
-  codeRow: { flexDirection: 'row', alignItems: 'center' },
-  codeBox: { backgroundColor: '#1C1E36', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, marginRight: 10 },
-  codeText: { fontWeight: 'bold', fontSize: 14 },
-  expText: { color: '#757575', fontSize: 10 },
-  
-  actionButtons: { justifyContent: 'space-between', paddingLeft: 10, height: 80 },
-  editBtn: { padding: 10, backgroundColor: 'rgba(33,150,243,0.1)', borderRadius: 10 },
-  deleteBtn: { padding: 10, backgroundColor: 'rgba(255,82,82,0.1)', borderRadius: 10 },
-  
-  emptyText: { color: '#757575', textAlign: 'center', marginTop: 50, fontSize: 16 },
+  headerSub: { color: '#B0B2C3', fontSize: 12, marginTop: 2 },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#2A2C49', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 25, maxHeight: '85%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  label: { color: '#AAA', fontSize: 12, marginBottom: 8, marginTop: 10 },
-  input: { backgroundColor: '#1C1E36', color: '#FFF', height: 50, borderRadius: 10, paddingHorizontal: 15, borderWidth: 1, borderColor: '#3A3C59', marginBottom: 10 },
-  
-  colorPicker: { flexDirection: 'row', justifyContent: 'space-around', marginVertical: 15 },
-  colorCircle: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  colorActive: { borderWidth: 3, borderColor: '#FFF' },
+  // Scroll Content ปรับดันลงมาให้พ้น Header
+  scrollContent: { padding: 20, paddingTop: 80, paddingBottom: 50 },
 
-  saveBtn: { backgroundColor: '#4CAF50', height: 55, borderRadius: 15, justifyContent: 'center', alignItems: 'center', marginTop: 20, marginBottom: 20 },
-  saveBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  createBtn: { flexDirection: 'row', backgroundColor: '#5E35B1', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, alignItems: 'center', elevation: 3 },
+  createBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 5 },
+
+  // Stats
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  statBox: { width: '31%', backgroundColor: '#FFF', borderRadius: 15, padding: 12, alignItems: 'center', elevation: 2 },
+  statIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  statVal: { fontSize: 16, fontWeight: 'bold', color: '#333', textAlign: 'center' },
+  statLabel: { fontSize: 9, color: '#757575', textAlign: 'center', marginTop: 2 },
+  statInfo: { alignItems: 'center' },
+
+  // Table
+  tableContainer: { backgroundColor: '#FFF', borderRadius: 20, padding: 15, elevation: 3 },
+  tableHeaderSection: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  tableTitle: { fontSize: 14, fontWeight: 'bold', color: '#333' },
+  filterBox: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#E0E0E0', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 15 },
+  filterText: { fontSize: 10, color: '#757575', marginRight: 5 },
+  
+  thRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#EEEEEE', paddingBottom: 10, marginBottom: 10 },
+  thText: { fontSize: 10, color: '#9E9E9E', fontWeight: 'bold' },
+  tbody: { paddingBottom: 10 },
+  
+  tableRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F5F5F5', paddingVertical: 12 },
+  td: { justifyContent: 'center' },
+  iconCircle: { width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  couponNameText: { fontSize: 11, fontWeight: 'bold', color: '#333' },
+  couponSubText: { fontSize: 9, color: '#9E9E9E', marginTop: 2 },
+  
+  codeBadge: { alignSelf: 'center', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 10 },
+  codeBadgeText: { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
+  
+  mainValueText: { fontSize: 11, fontWeight: 'bold', color: '#333', textAlign: 'center' },
+  subValueText: { fontSize: 9, color: '#9E9E9E', textAlign: 'center', marginTop: 2 },
+  
+  usageText: { fontSize: 9, color: '#333', textAlign: 'center', marginBottom: 3 },
+  progressBarBg: { height: 4, backgroundColor: '#EEEEEE', borderRadius: 2, width: '80%', alignSelf: 'center' },
+  progressBarFill: { height: 4, borderRadius: 2 },
+  
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  statusText: { fontSize: 9, fontWeight: 'bold' },
+  
+  actionBtn: { padding: 6, borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 8 },
+
+  emptyText: { color: '#9E9E9E', textAlign: 'center', marginVertical: 20, fontSize: 12 },
+
+  // Modal สว่าง
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25, maxHeight: '85%' },
+  modalHeader: { marginBottom: 20 },
+  modalTitle: { color: '#333', fontSize: 18, fontWeight: 'bold' },
+  modalSubTitle: { color: '#9E9E9E', fontSize: 12, marginTop: 2 },
+  
+  label: { color: '#333', fontSize: 12, fontWeight: 'bold', marginBottom: 8, marginTop: 10 },
+  input: { backgroundColor: '#FFF', color: '#333', height: 45, borderRadius: 12, paddingHorizontal: 15, borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 5, fontSize: 13 },
+  textArea: { height: 80, paddingTop: 15 },
+  dropdownFake: { backgroundColor: '#FFF', height: 45, borderRadius: 12, paddingHorizontal: 15, borderWidth: 1, borderColor: '#E0E0E0', justifyContent: 'center' },
+  
+  rowGrid: { flexDirection: 'row', justifyContent: 'space-between' },
+  colHalf: { width: '48%' },
+
+  colorPicker: { flexDirection: 'row', marginTop: 5, marginBottom: 25 },
+  colorCircle: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+
+  modalActionRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 },
+  cancelBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E0E0E0', marginRight: 10 },
+  cancelBtnText: { color: '#757575', fontSize: 13, fontWeight: 'bold' },
+  saveBtn: { flexDirection: 'row', backgroundColor: '#5E35B1', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, alignItems: 'center', elevation: 2 },
+  saveBtnText: { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
 });

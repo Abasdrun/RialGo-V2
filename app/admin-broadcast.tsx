@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Alert, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,17 +8,26 @@ import { supabase } from '../supabase';
 export default function AdminBroadcastScreen() {
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
-  const [notiType, setNotiType] = useState('info'); // info, success, warning, ticket
+  const [notiType, setNotiType] = useState('info'); // info, success, warning, danger
   const [loading, setLoading] = useState(false);
+  const [totalUsers, setTotalUsers] = useState(0);
 
-  // 🚀 ฟังก์ชันกวาดรายชื่อแล้วยิงแจ้งเตือนทีเดียวทุกคน!
+  // 🚀 ดึงจำนวนผู้ใช้งานทั้งหมดแบบ Real-time ตอนเปิดหน้ามา
+  useEffect(() => {
+    const fetchUserCount = async () => {
+      const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+      setTotalUsers(count || 0);
+    };
+    fetchUserCount();
+  }, []);
+
   const handleBroadcast = async () => {
     if (!title.trim() || !message.trim()) {
       Alert.alert('แจ้งเตือน', 'กรุณากรอกหัวข้อและรายละเอียดข้อความให้ครบ!');
       return;
     }
 
-    Alert.alert('ยืนยันการส่งข้อความ', 'ระบบจะส่งข้อความนี้ไปยังผู้ใช้งาน "ทุกคน" ในระบบ\nคุณแน่ใจหรือไม่?', [
+    Alert.alert('ยืนยันการส่งข้อความ', `ระบบจะส่งข้อความนี้ไปยังผู้ใช้งานทั้งหมด ${totalUsers.toLocaleString()} คน ทันที\nคุณแน่ใจหรือไม่?`, [
       { text: 'ยกเลิก', style: 'cancel' },
       { 
         text: 'ส่งกระจายเสียง', 
@@ -27,15 +36,13 @@ export default function AdminBroadcastScreen() {
           try {
             setLoading(true);
 
-            // 1. ดึง ID ของผู้ใช้ทุกคนในระบบจากตาราง profiles
             const { data: users, error: fetchError } = await supabase.from('profiles').select('id');
             if (fetchError) throw fetchError;
             if (!users || users.length === 0) {
-              Alert.alert('แจ้งเตือน', 'ไม่พบผู้ใช้งานในระบบที่จะส่งข้อความหาได้');
+              Alert.alert('แจ้งเตือน', 'ไม่พบผู้ใช้งานในระบบ');
               return;
             }
 
-            // 2. จับคู่ข้อมูลเตรียมยิง (Bulk Insert)
             const notificationsToInsert = users.map((user) => ({
               user_id: user.id,
               title: title,
@@ -43,16 +50,15 @@ export default function AdminBroadcastScreen() {
               type: notiType,
             }));
 
-            // 3. ยิงเข้าตาราง notifications ตูมเดียวจบ!
             const { error: insertError } = await supabase.from('notifications').insert(notificationsToInsert);
             if (insertError) throw insertError;
 
-            Alert.alert('สำเร็จ! 🎉', `ส่งข้อความหาผู้ใช้งานจำนวน ${users.length} คน เรียบร้อยแล้ว!`);
+            Alert.alert('สำเร็จ! 🎉', `ส่งข้อความหาผู้ใช้งานจำนวน ${users.length.toLocaleString()} คน เรียบร้อยแล้ว!`);
             
-            // ล้างฟอร์ม
             setTitle('');
             setMessage('');
             setNotiType('info');
+            router.back(); // ส่งเสร็จแล้วเด้งกลับหน้าหลัก
 
           } catch (error: any) {
             Alert.alert('เกิดข้อผิดพลาด', error.message);
@@ -65,116 +71,167 @@ export default function AdminBroadcastScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         
-        {/* 👑 Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#FFF" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>กระจายข่าวสาร (Broadcast)</Text>
-          <View style={{width: 40}} />
+        {/* 👑 Header สีน้ำเงินเข้ม */}
+        <View style={styles.headerBg}>
+          <SafeAreaView edges={['top']}>
+            <View style={styles.headerTopRow}>
+              <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}>
+                <Ionicons name="chevron-back" size={24} color="#FFF" />
+              </TouchableOpacity>
+              <Text style={styles.headerTitleCenter}>Admin</Text>
+              <View style={{width: 40}} />
+            </View>
+          </SafeAreaView>
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           
-          <View style={styles.iconHeaderBox}>
-            <Ionicons name="megaphone" size={50} color="#FF9800" />
-            <Text style={styles.subTitle}>ส่งข้อความแจ้งเตือนหาทุกคน</Text>
-          </View>
-
+          {/* 📝 การ์ดฟอร์มหลักสีขาว (ซ้อนทับ Header) */}
           <View style={styles.formCard}>
             
+            <View style={styles.cardHeader}>
+              <Text style={styles.mainTitle}>ส่งข่าวสาร (Broadcast)</Text>
+              <Text style={styles.subTitle}>ส่งการแจ้งเตือนไปยังผู้ใช้ทั้งหมด</Text>
+            </View>
+
+            <View style={styles.iconWrapper}>
+              <View style={styles.iconBg}>
+                <Ionicons name="volume-medium" size={28} color="#5E35B1" />
+              </View>
+            </View>
+            
+            <Text style={styles.userCountText}>
+              ส่งการแจ้งเตือนให้ผู้ใช้ทั้งหมด <Text style={styles.highlightText}>{totalUsers.toLocaleString()} คน</Text>
+            </Text>
+
+            {/* Input หัวข้อ */}
             <Text style={styles.label}>หัวข้อการแจ้งเตือน (Title)</Text>
             <TextInput 
               style={styles.input} 
-              placeholder="เช่น: 🚨 ด่วน! แจ้งเตือนรถไฟล่าช้า" 
-              placeholderTextColor="#757575"
+              placeholder="เช่น : ประกาศสำคัญ" 
+              placeholderTextColor="#9E9E9E"
               value={title}
               onChangeText={setTitle}
             />
 
+            {/* Input รายละเอียด */}
             <Text style={styles.label}>รายละเอียด (Message)</Text>
             <TextInput 
               style={[styles.input, styles.textArea]} 
-              placeholder="พิมพ์รายละเอียดเนื้อหาที่ต้องการแจ้งให้ผู้โดยสารทราบ..." 
-              placeholderTextColor="#757575"
+              placeholder="พิมพ์ข้อความ...." 
+              placeholderTextColor="#9E9E9E"
               value={message}
               onChangeText={setMessage}
               multiline
               textAlignVertical="top"
             />
 
-            <Text style={styles.label}>ประเภทไอคอนแจ้งเตือน (Type)</Text>
+            {/* เลือกประเภทการแจ้งเตือน */}
+            <Text style={styles.label}>ประเภทการแจ้งเตือน</Text>
             <View style={styles.typeContainer}>
               
-              <TouchableOpacity style={[styles.typeBox, notiType === 'info' && styles.typeActiveInfo]} onPress={() => setNotiType('info')}>
-                <Ionicons name="information-circle" size={24} color={notiType === 'info' ? "#FFF" : "#2196F3"} />
-                <Text style={[styles.typeText, notiType === 'info' && {color: '#FFF'}]}>ทั่วไป</Text>
+              <TouchableOpacity style={[styles.typeBox, notiType === 'info' && styles.typeActive]} onPress={() => setNotiType('info')}>
+                <View style={[styles.typeDot, {backgroundColor: '#42A5F5'}]} />
+                <Text style={[styles.typeText, notiType === 'info' && styles.typeTextActive]}>ทั่วไป</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.typeBox, notiType === 'success' && styles.typeActiveSuccess]} onPress={() => setNotiType('success')}>
-                <Ionicons name="checkmark-circle" size={24} color={notiType === 'success' ? "#FFF" : "#4CAF50"} />
-                <Text style={[styles.typeText, notiType === 'success' && {color: '#FFF'}]}>สำเร็จ</Text>
+              <TouchableOpacity style={[styles.typeBox, notiType === 'success' && styles.typeActive]} onPress={() => setNotiType('success')}>
+                <View style={[styles.typeDot, {backgroundColor: '#4CAF50'}]} />
+                <Text style={[styles.typeText, notiType === 'success' && styles.typeTextActive]}>สำเร็จ/โปรโมชั่น</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.typeBox, notiType === 'warning' && styles.typeActiveWarning]} onPress={() => setNotiType('warning')}>
-                <Ionicons name="warning" size={24} color={notiType === 'warning' ? "#FFF" : "#FF9800"} />
-                <Text style={[styles.typeText, notiType === 'warning' && {color: '#FFF'}]}>ด่วน/เตือน</Text>
+              <TouchableOpacity style={[styles.typeBox, notiType === 'warning' && styles.typeActive]} onPress={() => setNotiType('warning')}>
+                <View style={[styles.typeDot, {backgroundColor: '#FFCA28'}]} />
+                <Text style={[styles.typeText, notiType === 'warning' && styles.typeTextActive]}>แจ้งเตือน</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.typeBox, notiType === 'ticket' && styles.typeActiveTicket]} onPress={() => setNotiType('ticket')}>
-                <Ionicons name="ticket" size={24} color={notiType === 'ticket' ? "#FFF" : "#5E35B1"} />
-                <Text style={[styles.typeText, notiType === 'ticket' && {color: '#FFF'}]}>โปรโมชั่น</Text>
+              <TouchableOpacity style={[styles.typeBox, notiType === 'danger' && styles.typeActive]} onPress={() => setNotiType('danger')}>
+                <View style={[styles.typeDot, {backgroundColor: '#EF5350'}]} />
+                <Text style={[styles.typeText, notiType === 'danger' && styles.typeTextActive]}>ด่วน/สำคัญ</Text>
               </TouchableOpacity>
 
             </View>
 
-            <TouchableOpacity 
-              style={[styles.sendBtn, loading && {backgroundColor: '#757575'}]} 
-              onPress={handleBroadcast}
-              disabled={loading}
-            >
-              {loading ? <ActivityIndicator color="#FFF" /> : (
-                <>
-                  <Ionicons name="send" size={20} color="#FFF" style={{marginRight: 10}} />
-                  <Text style={styles.sendBtnText}>ส่งข้อความ (Broadcast Now)</Text>
-                </>
-              )}
-            </TouchableOpacity>
+            {/* แถบคำเตือนสีเหลือง */}
+            <View style={styles.warningBanner}>
+              <Ionicons name="warning-outline" size={20} color="#F57F17" style={{marginRight: 10}} />
+              <Text style={styles.warningText}>การส่ง Broadcast จะส่งไปยังผู้ใช้งานทั้งหมดทันที ไม่สามารถยกเลิกได้ กรุณาตรวจสอบข้อมูลก่อนส่ง</Text>
+            </View>
+
+            {/* ปุ่มกดยืนยัน / ยกเลิก */}
+            <View style={styles.actionRow}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()}>
+                <Text style={styles.cancelBtnText}>ยกเลิก</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.sendBtn, loading && {backgroundColor: '#9E9E9E'}]} 
+                onPress={handleBroadcast}
+                disabled={loading}
+              >
+                {loading ? <ActivityIndicator color="#FFF" /> : (
+                  <>
+                    <Ionicons name="volume-medium" size={16} color="#FFF" style={{marginRight: 6}} />
+                    <Text style={styles.sendBtnText}>ส่งข่าวสาร (Broadcast Now)</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
 
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1C1E36' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  scrollContent: { padding: 20, paddingBottom: 50 },
+  container: { flex: 1, backgroundColor: '#F4F6F9' },
   
-  iconHeaderBox: { alignItems: 'center', marginBottom: 30 },
-  subTitle: { color: '#AAA', fontSize: 14, marginTop: 10 },
+  // Header โทนน้ำเงิน
+  headerBg: { backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, paddingBottom: 60, overflow: 'hidden', position: 'absolute', top: 0, left: 0, right: 0, height: 250 },
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10 },
+  backBtnCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  headerTitleCenter: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
 
-  formCard: { backgroundColor: '#2A2C49', borderRadius: 25, padding: 25, elevation: 5 },
-  label: { color: '#FFF', fontSize: 14, fontWeight: 'bold', marginBottom: 10, marginTop: 10 },
-  input: { backgroundColor: '#1C1E36', color: '#FFF', borderRadius: 15, paddingHorizontal: 15, paddingVertical: 15, borderWidth: 1, borderColor: '#3A3C59', fontSize: 14, marginBottom: 15 },
-  textArea: { height: 120, paddingTop: 15 },
-
-  typeContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 30 },
-  typeBox: { width: '48%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1E36', padding: 15, borderRadius: 15, borderWidth: 1, borderColor: '#3A3C59', marginBottom: 10 },
-  typeText: { color: '#AAA', fontSize: 12, fontWeight: 'bold', marginLeft: 10 },
+  scrollContent: { padding: 20, paddingTop: 120, paddingBottom: 50 },
   
-  typeActiveInfo: { backgroundColor: '#2196F3', borderColor: '#2196F3' },
-  typeActiveSuccess: { backgroundColor: '#4CAF50', borderColor: '#4CAF50' },
-  typeActiveWarning: { backgroundColor: '#FF9800', borderColor: '#FF9800' },
-  typeActiveTicket: { backgroundColor: '#5E35B1', borderColor: '#5E35B1' },
+  // การ์ดสีขาวซ้อนทับ
+  formCard: { backgroundColor: '#FFF', borderRadius: 25, padding: 25, elevation: 6, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, shadowOffset: {width: 0, height: 5} },
+  cardHeader: { marginBottom: 20 },
+  mainTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+  subTitle: { fontSize: 12, color: '#757575', marginTop: 4 },
 
-  sendBtn: { flexDirection: 'row', backgroundColor: '#FF9800', height: 60, borderRadius: 20, justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: '#FF9800', shadowOpacity: 0.4, shadowOffset: {width: 0, height: 4} },
-  sendBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' }
+  iconWrapper: { alignItems: 'center', marginBottom: 10 },
+  iconBg: { backgroundColor: '#EBE4FF', width: 60, height: 60, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
+  userCountText: { textAlign: 'center', fontSize: 12, color: '#757575', marginBottom: 25 },
+  highlightText: { color: '#5E35B1', fontWeight: 'bold' },
+
+  // Inputs
+  label: { color: '#333', fontSize: 13, fontWeight: 'bold', marginBottom: 8, marginTop: 10 },
+  input: { backgroundColor: '#FFF', color: '#333', borderRadius: 12, paddingHorizontal: 15, paddingVertical: 12, borderWidth: 1, borderColor: '#E0E0E0', fontSize: 14, marginBottom: 15 },
+  textArea: { height: 100, paddingTop: 15 },
+
+  // Select Type
+  typeContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
+  typeBox: { width: '48%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 10 },
+  typeActive: { backgroundColor: '#F3E5F5', borderColor: '#5E35B1' },
+  typeDot: { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
+  typeText: { color: '#555', fontSize: 12, fontWeight: 'bold' },
+  typeTextActive: { color: '#5E35B1' },
+
+  // Warning Banner
+  warningBanner: { flexDirection: 'row', backgroundColor: '#FFF9E6', borderWidth: 1, borderColor: '#FFD54F', padding: 15, borderRadius: 12, marginBottom: 25, alignItems: 'flex-start' },
+  warningText: { flex: 1, color: '#F57F17', fontSize: 11, lineHeight: 18 },
+
+  // Action Buttons
+  actionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cancelBtn: { flex: 0.35, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E0E0E0', paddingVertical: 14, borderRadius: 15, alignItems: 'center', marginRight: 10 },
+  cancelBtnText: { color: '#757575', fontSize: 14, fontWeight: 'bold' },
+  
+  sendBtn: { flex: 0.65, flexDirection: 'row', backgroundColor: '#5E35B1', paddingVertical: 14, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
+  sendBtnText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' }
 });

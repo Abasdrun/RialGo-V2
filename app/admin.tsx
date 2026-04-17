@@ -1,110 +1,364 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Dimensions, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
+import { supabase } from '../supabase';
+
+const { width } = Dimensions.get('window');
 
 export default function AdminDashboardScreen() {
+  const [loading, setLoading] = useState(true);
+  
+  // 📌 States สำหรับเก็บข้อมูลจริง
+  const [stats, setStats] = useState({ totalTrips: 0, revenue: 0, salesPercent: 0, totalUsers: 0 });
+  const [activities, setActivities] = useState<any[]>([]);
+  const [recentTrips, setRecentTrips] = useState<any[]>([]);
+  const [broadcasts, setBroadcasts] = useState<any[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchAllDashboardData();
+    }, [])
+  );
+
+  // 🕒 ฟังก์ชันคำนวณเวลา (เช่น 5 นาทีที่แล้ว)
+  const timeAgo = (dateStr: string) => {
+    const seconds = Math.floor((new Date().getTime() - new Date(dateStr).getTime()) / 1000);
+    if (seconds < 60) return `${seconds} วินาทีที่แล้ว`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes} นาทีที่แล้ว`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} ชั่วโมงที่แล้ว`;
+    return `${Math.floor(hours / 24)} วันที่แล้ว`;
+  };
+
+  // 📅 ฟังก์ชันแปลงวันที่เป็นภาษาไทย (เช่น 27 มี.ค. 2026)
+  const formatThaiDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const months = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+    const d = new Date(dateStr);
+    return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+  };
+
+  const fetchAllDashboardData = async () => {
+    setLoading(true);
+    try {
+      // ==========================================
+      // 📊 1. ดึงสถิติภาพรวม (Stats)
+      // ==========================================
+      const { count: tripsCount } = await supabase.from('trips').select('*', { count: 'exact', head: true });
+      const { count: usersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+      const { data: revenueData } = await supabase.from('bookings').select('total_price').eq('status', 'Confirmed');
+      
+      let totalRev = 0;
+      let salesCount = revenueData ? revenueData.length : 0;
+      if (revenueData) {
+        totalRev = revenueData.reduce((sum, b) => sum + (Number(b.total_price) || 350), 0);
+      }
+
+      setStats({
+        totalTrips: tripsCount || 0,
+        totalUsers: usersCount || 0,
+        revenue: totalRev,
+        salesPercent: tripsCount ? Math.min(Math.round((salesCount / (tripsCount * 40)) * 100), 100) : 0 
+      });
+
+      // ==========================================
+      // 🚄 2. ดึงรอบเที่ยว "ที่ถูกเพิ่มเข้ามาล่าสุด" 3 รายการ
+      // ==========================================
+      const { data: tripsData } = await supabase
+        .from('trips')
+        .select(`
+          id, departure_date, available_seats, status, created_at,
+          trains ( type, train_number, departure_time, arrival_time, origin:origin_station_id(station_name), dest:destination_station_id(station_name) )
+        `)
+        // 🚀 โค้ดตรงนี้แหละที่เรียงตามเวลาที่แอดมินกดสร้างรอบรถ (เพิ่งเพิ่มสดๆร้อนๆ จะอยู่บนสุด)
+        .order('created_at', { ascending: false }) 
+        .limit(3);
+
+      if (tripsData) {
+        const formattedTrips = tripsData.map(t => ({
+          id: t.id.toString(),
+          route: `${t.trains?.origin?.station_name || '?'} ➔ ${t.trains?.dest?.station_name || '?'}`,
+          date: formatThaiDate(t.departure_date), // แปลงเป็นวันที่แบบไทย
+          time: `${t.trains?.departure_time?.substring(0,5)} - ${t.trains?.arrival_time?.substring(0,5)}`,
+          seat: `${t.available_seats}/40`, 
+          status: t.status === 'Scheduled' ? 'เปิดจอง' : t.status === 'Completed' ? 'เดินทางแล้ว' : 'เต็มแล้ว',
+          statusColor: t.status === 'Scheduled' ? '#E8F5E9' : '#FFEBEE',
+          textColor: t.status === 'Scheduled' ? '#4CAF50' : '#F44336'
+        }));
+        setRecentTrips(formattedTrips);
+      }
+
+      // ==========================================
+      // 📜 3. ดึงประวัติการส่งข่าวสาร
+      // ==========================================
+      const { data: notifs } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(300);
+
+      if (notifs) {
+        const grouped = new Map();
+        notifs.forEach(n => {
+          const key = n.title + n.message;
+          if (!grouped.has(key)) {
+            grouped.set(key, {
+              id: n.id.toString(), title: n.title, message: n.message, type: n.type,
+              typeLabel: n.type === 'warning' ? 'ด่วน' : n.type === 'ticket' ? 'โปรโมชั่น' : 'ทั่วไป',
+              recipients: 1, time: timeAgo(n.created_at), created_at: new Date(n.created_at).getTime()
+            });
+          } else {
+            grouped.get(key).recipients += 1;
+          }
+        });
+        const uniqueBroadcasts = Array.from(grouped.values()).sort((a, b) => b.created_at - a.created_at).slice(0, 2);
+        setBroadcasts(uniqueBroadcasts);
+      }
+
+      // ==========================================
+      // 📝 4. สร้าง "กิจกรรมล่าสุด" 
+      // ==========================================
+      const { data: latestUsers } = await supabase.from('profiles').select('id, full_name, created_at').order('created_at', { ascending: false }).limit(2);
+      const { data: latestBookings } = await supabase.from('bookings').select('id, status, created_at').order('created_at', { ascending: false }).limit(3);
+      
+      let allActs: any[] = [];
+      
+      if (latestUsers) latestUsers.forEach(u => allActs.push({ id: `u_${u.id}`, title: `ผู้ใช้ใหม่ลงทะเบียน: ${u.full_name || 'ไม่ระบุชื่อ'}`, time: u.created_at, color: '#2196F3' }));
+      if (latestBookings) latestBookings.forEach(b => allActs.push({ id: `b_${b.id}`, title: b.status === 'Confirmed' ? `มีรายการจองตั๋วสำเร็จใหม่` : `มีคำสั่งซื้อรอดำเนินการ`, time: b.created_at, color: b.status === 'Confirmed' ? '#4CAF50' : '#FFB300' }));
+      if (tripsData) tripsData.slice(0,2).forEach(t => allActs.push({ id: `t_${t.id}`, title: `เพิ่มรอบเที่ยว ${t.trains?.origin?.station_name} ➔ ${t.trains?.dest?.station_name} สำเร็จ`, time: t.created_at, color: '#5E35B1' }));
+
+      allActs.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+      
+      const formattedActivities = allActs.slice(0, 5).map(act => ({ ...act, timeAgo: timeAgo(act.time) }));
+      setActivities(formattedActivities);
+
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
-      {/* 👑 Header Admin */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="close" size={24} color="#FFF" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>ศูนย์บัญชาการ (Admin)</Text>
-        <View style={{width: 40}} />
+    <View style={styles.container}>
+      
+      <View style={styles.headerBg}>
+        <View style={styles.headerCurve} />
+        <SafeAreaView edges={['top']}>
+          <View style={styles.headerTopRow}>
+            {/* ปุ่มย้อนกลับ Home */}
+            <TouchableOpacity style={styles.homeBtn} onPress={() => router.push('/')}>
+              <Ionicons name="home" size={20} color="#FFF" />
+              <Text style={styles.homeBtnText}>หน้าหลักลูกค้า</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.profileCircle}>
+              <Text style={styles.profileInit}>A</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{paddingHorizontal: 25, marginTop: 15}}>
+            <Text style={styles.greetingText}>ศูนย์บัญชาการ 👋</Text>
+            <Text style={styles.adminName}>Admin Dashboard</Text>
+          </View>
+
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="#8A8CB2" style={{marginLeft: 15}} />
+            <TextInput style={styles.searchInput} placeholder="ค้นหาข้อมูลในระบบ..." placeholderTextColor="#8A8CB2" />
+            <Ionicons name="options-outline" size={20} color="#8A8CB2" style={{marginRight: 15}} />
+          </View>
+        </SafeAreaView>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        
-        <View style={styles.welcomeBox}>
-          <Ionicons name="shield-checkmark" size={40} color="#4CAF50" />
-          <Text style={styles.welcomeTitle}>ระบบจัดการ RailGo</Text>
-          <Text style={styles.welcomeSub}>ยินดีต้อนรับพนักงานการรถไฟ</Text>
+      {loading ? (
+        <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+          <ActivityIndicator size="large" color="#5E35B1" />
+          <Text style={{marginTop: 10, color: '#757575'}}>กำลังดึงข้อมูล Real-time...</Text>
         </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>ข้อมูลระบบ RailGo (Real-time)</Text>
+            <TouchableOpacity style={styles.broadcastActionBtn} onPress={() => router.push('/admin-broadcast')}>
+              <Ionicons name="megaphone" size={14} color="#FFF" style={{marginRight: 5}}/>
+              <Text style={styles.broadcastActionText}>ส่งข่าวสารใหม่</Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* 🎛️ เมนูแอดมิน */}
-        <Text style={styles.sectionTitle}>เมนูการจัดการ</Text>
+          <View style={styles.statsGrid}>
+            <View style={styles.statCard}>
+              <View style={[styles.statIconBox, {backgroundColor: '#EBE4FF'}]}><Ionicons name="time" size={22} color="#5E35B1" /></View>
+              <View><Text style={styles.statValue}>{stats.totalTrips.toLocaleString()}</Text><Text style={styles.statLabel}>รอบเที่ยวทั้งหมด</Text></View>
+            </View>
+            <View style={styles.statCard}>
+              <View style={[styles.statIconBox, {backgroundColor: '#FFF8E1'}]}><Ionicons name="cash" size={22} color="#FFB300" /></View>
+              <View><Text style={styles.statValue}>{(stats.revenue / 1000).toFixed(1)}k</Text><Text style={styles.statLabel}>รายได้โดยประมาณ</Text></View>
+            </View>
+            <View style={styles.statCard}>
+              <View style={[styles.statIconBox, {backgroundColor: '#E8F5E9'}]}><Ionicons name="card" size={22} color="#4CAF50" /></View>
+              <View><Text style={styles.statValue}>{stats.salesPercent}%</Text><Text style={styles.statLabel}>อัตราการจองตั๋ว</Text></View>
+            </View>
+            <View style={styles.statCard}>
+              <View style={[styles.statIconBox, {backgroundColor: '#E3F2FD'}]}><Ionicons name="people" size={22} color="#2196F3" /></View>
+              <View><Text style={styles.statValue}>{stats.totalUsers.toLocaleString()}</Text><Text style={styles.statLabel}>ผู้ใช้งานทั้งหมด</Text></View>
+            </View>
+          </View>
 
-        {/* ✅ ปุ่มจัดการรอบรถไฟ */}
-        <TouchableOpacity 
-          style={styles.menuCard}
-          onPress={() => router.push('/admin-trips')}
-        >
-          <View style={[styles.iconBox, {backgroundColor: '#E3F2FD'}]}>
-            <Ionicons name="train" size={24} color="#2196F3" />
+          <Text style={styles.sectionTitleMain}>เมนูลัดสำหรับ Admin</Text>
+          <View style={styles.quickMenuRow}>
+            <TouchableOpacity style={styles.quickMenuBtn} onPress={() => router.push('/admin-trips')}>
+              <View style={[styles.quickIcon, {backgroundColor: '#D1C4E9'}]}><Ionicons name="train" size={26} color="#5E35B1" /></View>
+              <Text style={styles.quickText}>เพิ่มรอบเที่ยว</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.quickMenuBtn} onPress={() => router.push('/admin-coupons')}>
+              <View style={[styles.quickIcon, {backgroundColor: '#B2DFDB'}]}><MaterialCommunityIcons name="ticket-percent" size={26} color="#00796B" /></View>
+              <Text style={styles.quickText}>สร้างคูปอง</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.quickMenuBtn} onPress={() => router.push('/admin-banners')}>
+              <View style={[styles.quickIcon, {backgroundColor: '#FFECB3'}]}><Ionicons name="images" size={26} color="#F57F17" /></View>
+              <Text style={styles.quickText}>แบนเนอร์</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.quickMenuBtn} onPress={() => router.push('/admin-broadcast')}>
+              <View style={[styles.quickIcon, {backgroundColor: '#FFCDD2'}]}><Ionicons name="megaphone" size={26} color="#D32F2F" /></View>
+              <Text style={styles.quickText}>ส่งข่าวสาร</Text>
+            </TouchableOpacity>
           </View>
-          <View style={styles.menuTextInfo}>
-            <Text style={styles.menuTitle}>จัดการรอบรถไฟ (Trips)</Text>
-            <Text style={styles.menuSub}>เพิ่ม ลบ แก้ไข รอบการเดินทาง</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#9E9E9E" />
-        </TouchableOpacity>
 
-        {/* ✅ เติม onPress ให้ปุ่มจัดการคูปองตรงนี้! */}
-        <TouchableOpacity 
-          style={styles.menuCard}
-          onPress={() => router.push('/admin-coupons')}
-        >
-          <View style={[styles.iconBox, {backgroundColor: '#FCE4EC'}]}>
-            <MaterialCommunityIcons name="ticket-percent" size={24} color="#E91E63" />
+          <View style={styles.historyHeader}>
+            <Text style={styles.sectionTitle}>กิจกรรมล่าสุด</Text>
           </View>
-          <View style={styles.menuTextInfo}>
-            <Text style={styles.menuTitle}>จัดการคูปองส่วนลด</Text>
-            <Text style={styles.menuSub}>สร้างโค้ดโปรโมชั่นใหม่ให้ลูกค้า</Text>
+          <View style={styles.activityContainer}>
+            {activities.map((act) => (
+              <View key={act.id} style={styles.activityItem}>
+                <View style={[styles.activityDot, {backgroundColor: act.color}]} />
+                <Text style={styles.activityTitle} numberOfLines={2}>{act.title}</Text>
+                <Text style={styles.activityTime}>{act.timeAgo}</Text>
+              </View>
+            ))}
+            {activities.length === 0 && <Text style={{color: '#9E9E9E', fontSize: 12}}>ยังไม่มีกิจกรรมเคลื่อนไหว</Text>}
           </View>
-          <Ionicons name="chevron-forward" size={20} color="#9E9E9E" />
-        </TouchableOpacity>
 
-        {/* 🆕 ปุ่มจัดการแบนเนอร์ (Banners) ที่เรากำลังจะทำต่อไป! */}
-        <TouchableOpacity 
-          style={styles.menuCard}
-          onPress={() => router.push('/admin-banners')}
-        >
-          <View style={[styles.iconBox, {backgroundColor: '#E8F5E9'}]}>
-            <Ionicons name="images" size={24} color="#4CAF50" />
+          {/* 🚄 รอบเที่ยวล่าสุด */}
+          <View style={[styles.historyHeader, {marginTop: 10}]}>
+            <Text style={styles.sectionTitle}>รอบเที่ยวที่เพิ่มล่าสุด</Text>
+            <TouchableOpacity onPress={() => router.push('/admin-trips')}><Text style={styles.viewAllText}>จัดการทั้งหมด</Text></TouchableOpacity>
           </View>
-          <View style={styles.menuTextInfo}>
-            <Text style={styles.menuTitle}>จัดการแบนเนอร์ (Banners)</Text>
-            <Text style={styles.menuSub}>เปลี่ยนรูปข่าวสารบนหน้า Home</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#9E9E9E" />
-        </TouchableOpacity>
+          <View style={styles.tableContainer}>
+            <View style={styles.tableHeaderRow}>
+              <Text style={[styles.thText, {flex: 2}]}>เส้นทาง</Text>
+              <Text style={[styles.thText, {flex: 1.5}]}>วันที่เดินทาง</Text>
+              <Text style={[styles.thText, {flex: 1.5}]}>เวลา</Text>
+              <Text style={[styles.thText, {flex: 1, textAlign: 'center'}]}>ที่นั่ง</Text>
+              <Text style={[styles.thText, {flex: 1, textAlign: 'center'}]}>สถานะ</Text>
+            </View>
 
-        {/* ✅ ปุ่มกระจายข่าวสาร */}
-        <TouchableOpacity 
-          style={styles.menuCard}
-          onPress={() => router.push('/admin-broadcast')}
-        >
-          <View style={[styles.iconBox, {backgroundColor: '#FFF3E0'}]}>
-            <Ionicons name="megaphone" size={24} color="#FF9800" />
+            {recentTrips.map((trip) => (
+              <View key={trip.id} style={styles.tableRow}>
+                <Text style={[styles.tdText, {flex: 2, fontWeight: 'bold', color: '#333'}]} numberOfLines={1}>{trip.route}</Text>
+                <Text style={[styles.tdText, {flex: 1.5}]}>{trip.date}</Text>
+                <Text style={[styles.tdText, {flex: 1.5}]}>{trip.time}</Text>
+                <Text style={[styles.tdText, {flex: 1, textAlign: 'center', color: trip.textColor, fontWeight: 'bold'}]}>{trip.seat}</Text>
+                <View style={{flex: 1, alignItems: 'center'}}>
+                  <View style={[styles.statusPill, {backgroundColor: trip.statusColor}]}>
+                    <Text style={[styles.statusPillText, {color: trip.textColor}]}>{trip.status}</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+            {recentTrips.length === 0 && <Text style={{color: '#9E9E9E', textAlign: 'center', marginVertical: 10}}>ไม่มีรอบรถในระบบ</Text>}
           </View>
-          <View style={styles.menuTextInfo}>
-            <Text style={styles.menuTitle}>กระจายข่าวสาร (Broadcast)</Text>
-            <Text style={styles.menuSub}>ยิงแจ้งเตือนหาผู้โดยสารทุกคน</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#9E9E9E" />
-        </TouchableOpacity>
 
-      </ScrollView>
-    </SafeAreaView>
+          <View style={[styles.historyHeader, {marginTop: 30}]}>
+            <Text style={styles.sectionTitle}>ประวัติการส่งข่าวสาร</Text>
+          </View>
+
+          {broadcasts.map((item) => (
+            <View key={item.id} style={styles.historyCard}>
+              <View style={[styles.cardTag, { backgroundColor: item.type === 'warning' ? '#F44336' : item.type === 'ticket' ? '#5E35B1' : '#2196F3' }]} />
+              <View style={styles.cardContent}>
+                <View style={styles.cardTopRow}>
+                  <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+                  <View style={[styles.badge, item.type === 'warning' ? styles.badgeWarning : styles.badgeInfo]}>
+                    <Text style={[styles.badgeText, { color: item.type === 'warning' ? '#F44336' : '#2196F3' }]}>{item.typeLabel}</Text>
+                  </View>
+                </View>
+                <Text style={styles.cardMessage} numberOfLines={2}>{item.message}</Text>
+                <View style={styles.cardFooter}>
+                  <View style={styles.footerInfo}>
+                    <Ionicons name="people-outline" size={14} color="#9E9E9E" />
+                    <Text style={styles.footerText}>{item.recipients.toLocaleString()} คน  ·  {item.time}</Text>
+                  </View>
+                  <View style={styles.statusSuccess}>
+                    <Ionicons name="checkmark-circle" size={14} color="#4CAF50" />
+                    <Text style={styles.statusText}>ส่งสำเร็จ</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          ))}
+          {broadcasts.length === 0 && <Text style={{color: '#9E9E9E', textAlign: 'center'}}>ยังไม่เคยส่งข้อความ Broadcast</Text>}
+
+        </ScrollView>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1C1E36' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  scrollContent: { padding: 20 },
-  welcomeBox: { alignItems: 'center', backgroundColor: '#2A2C49', padding: 30, borderRadius: 20, marginBottom: 30 },
-  welcomeTitle: { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginTop: 15 },
-  welcomeSub: { color: '#AAA', fontSize: 14, marginTop: 5 },
-  sectionTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 15 },
-  menuCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2A2C49', padding: 15, borderRadius: 20, marginBottom: 15 },
-  iconBox: { width: 50, height: 50, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
-  menuTextInfo: { flex: 1, marginLeft: 15 },
-  menuTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  menuSub: { color: '#AAA', fontSize: 12, marginTop: 2 }
+  container: { flex: 1, backgroundColor: '#F8F9FB' },
+  headerBg: { backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, paddingBottom: 25, overflow: 'hidden' },
+  headerCurve: { position: 'absolute', top: -50, right: -50, width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.05)' },
+  headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 25, paddingTop: 10 },
+  homeBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 },
+  homeBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 6 },
+  profileCircle: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: '#6C63FF', justifyContent: 'center', alignItems: 'center' },
+  profileInit: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  greetingText: { color: '#B0B2C3', fontSize: 14 },
+  adminName: { color: '#FFF', fontSize: 24, fontWeight: 'bold' },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1A1C3E', marginHorizontal: 25, marginTop: 20, borderRadius: 20, height: 45 },
+  searchInput: { flex: 1, color: '#FFF', marginLeft: 10, fontSize: 14 },
+  scrollContent: { padding: 20, paddingBottom: 50 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#E0E0E0', paddingBottom: 10, marginBottom: 15 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  broadcastActionBtn: { flexDirection: 'row', backgroundColor: '#262956', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, alignItems: 'center' },
+  broadcastActionText: { color: '#FFF', fontSize: 11, fontWeight: 'bold' },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 10 },
+  statCard: { width: '48%', backgroundColor: '#FFF', borderRadius: 20, padding: 15, flexDirection: 'row', alignItems: 'center', elevation: 2, marginBottom: 10 },
+  statIconBox: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  statValue: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  statLabel: { fontSize: 10, color: '#757575', marginTop: 2 },
+  sectionTitleMain: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 15, marginTop: 15 },
+  quickMenuRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25, borderBottomWidth: 1, borderBottomColor: '#EEE', paddingBottom: 20 },
+  quickMenuBtn: { alignItems: 'center', width: '23%' },
+  quickIcon: { width: 60, height: 60, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  quickText: { fontSize: 10, color: '#333', fontWeight: '500', textAlign: 'center' },
+  activityContainer: { marginBottom: 20 },
+  activityItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
+  activityDot: { width: 8, height: 8, borderRadius: 4, marginRight: 15 },
+  activityTitle: { flex: 1, fontSize: 13, color: '#333', fontWeight: '500' },
+  activityTime: { fontSize: 10, color: '#9E9E9E', marginLeft: 10 },
+  tableContainer: { backgroundColor: '#FFF', borderRadius: 20, padding: 15, elevation: 2 },
+  tableHeaderRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', paddingBottom: 10, marginBottom: 10 },
+  thText: { fontSize: 10, color: '#9E9E9E', fontWeight: 'bold' },
+  tableRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
+  tdText: { fontSize: 11, color: '#555' },
+  statusPill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
+  statusPillText: { fontSize: 9, fontWeight: 'bold' },
+  historyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  viewAllText: { fontSize: 12, color: '#757575', fontWeight: 'bold' },
+  historyCard: { backgroundColor: '#FFF', borderRadius: 20, marginBottom: 15, overflow: 'hidden', elevation: 2, flexDirection: 'row' },
+  cardTag: { width: 6 },
+  cardContent: { flex: 1, padding: 15 },
+  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  cardTitle: { fontSize: 15, fontWeight: 'bold', color: '#333', flex: 1 },
+  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  badgeInfo: { backgroundColor: '#E3F2FD' },
+  badgeWarning: { backgroundColor: '#FFEBEE' },
+  badgeText: { fontSize: 10, fontWeight: 'bold' },
+  cardMessage: { fontSize: 13, color: '#666', lineHeight: 18, marginBottom: 12 },
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  footerInfo: { flexDirection: 'row', alignItems: 'center' },
+  footerText: { fontSize: 11, color: '#9E9E9E', marginLeft: 5 },
+  statusSuccess: { flexDirection: 'row', alignItems: 'center' },
+  statusText: { fontSize: 11, color: '#4CAF50', fontWeight: 'bold', marginLeft: 4 }
 });

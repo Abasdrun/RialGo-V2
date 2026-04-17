@@ -24,15 +24,14 @@ interface Ticket {
   cabin: string;
   pax: number;
   classType: string;
-  originCoords: { latitude: number, longitude: number }; // 📍 พิกัดต้นทาง
-  destCoords: { latitude: number, longitude: number };   // 📍 พิกัดปลายทาง
+  originCoords: { latitude: number, longitude: number }; 
+  destCoords: { latitude: number, longitude: number };   
 }
 
 export default function LocationScreen() {
   const [loading, setLoading] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [location, setLocation] = useState<any>(null);
-  const [userInitial, setUserInitial] = useState('อ'); // 🚀 เอากลับมาแล้ว!
 
   const [activeMapTicket, setActiveMapTicket] = useState<Ticket | null>(null);
   const [activeAlertTicket, setActiveAlertTicket] = useState<Ticket | null>(null);
@@ -42,7 +41,6 @@ export default function LocationScreen() {
     requestLocationPermission();
   }, []);
 
-  // ไม่ดัก Error ตามที่สั่ง ปล่อยแดงถ้าไม่เปิด GPS
   const requestLocationPermission = async () => {
     let { status } = await Location.requestForegroundPermissionsAsync();
     if (status === 'granted') {
@@ -73,8 +71,6 @@ export default function LocationScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        setUserInitial(user.user_metadata?.full_name?.charAt(0).toUpperCase() || 'อ');
-
         const { data: bookings } = await supabase
           .from('bookings')
           .select(`
@@ -126,8 +122,8 @@ export default function LocationScreen() {
               id: b.id.toString(),
               refCode: `TH ${new Date(b.created_at).getFullYear()}-${String(b.id).padStart(5, '0')}`,
               trainName: `${b.trips?.trains?.type || 'ด่วนพิเศษ'} ${b.trips?.trains?.train_number || '7'}`,
-              origin: b.origin?.station_name || 'ดอนเมือง',
-              dest: b.dest?.station_name || 'รังสิต',
+              origin: b.origin?.station_name || 'ไม่ระบุ',
+              dest: b.dest?.station_name || 'ไม่ระบุ',
               depTime: exactDep,
               arrTime: exactArr,
               duration: durationTxt,
@@ -136,14 +132,14 @@ export default function LocationScreen() {
               cabin: cabin,
               pax: count,
               classType: b.trips?.trains?.type === 'รถด่วนพิเศษ' ? 'ชั้น 2' : 'ชั้น 3',
-              // 🚀 ดึงพิกัดจากฐานข้อมูล (ถ้าไม่มีให้ Default เป็นแถวดอนเมือง/รังสิต)
+              // 🚀 ดึงพิกัดจากฐานข้อมูลล้วนๆ ถ้าไม่มีเซ็ตเป็น 0 (ลบดอนเมืองรังสิตทิ้งแล้ว)
               originCoords: { 
-                latitude: parseFloat(b.origin?.latitude) || 13.9235, 
-                longitude: parseFloat(b.origin?.longitude) || 100.6042 
+                latitude: parseFloat(b.origin?.latitude) || 0, 
+                longitude: parseFloat(b.origin?.longitude) || 0 
               },
               destCoords: { 
-                latitude: parseFloat(b.dest?.latitude) || 13.9858, 
-                longitude: parseFloat(b.dest?.longitude) || 100.6066 
+                latitude: parseFloat(b.dest?.latitude) || 0, 
+                longitude: parseFloat(b.dest?.longitude) || 0 
               }
             };
           }));
@@ -180,10 +176,7 @@ export default function LocationScreen() {
             <Ionicons name="chevron-back" size={24} color="#FFF" />
             <Text style={styles.headerTitle}>Location</Text>
           </TouchableOpacity>
-          {/* 🚀 เอาปุ่มโปรไฟล์ตัวอักษรกลับมาให้แล้ว! */}
-          <TouchableOpacity style={styles.profileBtnCircle}>
-            <Text style={styles.profileBtnText}>{userInitial}</Text>
-          </TouchableOpacity>
+          {/* 🚀 ลบปุ่มวงกลมตัว A ออกเรียบร้อยครับ */}
         </View>
 
         {loading ? (
@@ -195,7 +188,7 @@ export default function LocationScreen() {
                 
                 <View style={styles.routeRow}>
                   <View style={{flex: 1}}>
-                    <Text style={styles.cityText}>{ticket.origin}</Text>
+                    <Text style={styles.cityText} numberOfLines={1}>{ticket.origin}</Text>
                     <Text style={styles.timeText}>{ticket.depTime}</Text>
                   </View>
                   <View style={styles.arrowContainer}>
@@ -203,7 +196,7 @@ export default function LocationScreen() {
                     <Ionicons name="caret-forward" size={16} color="#BDBDBD" style={{marginTop: -8}} />
                   </View>
                   <View style={{flex: 1, alignItems: 'flex-end'}}>
-                    <Text style={styles.cityText}>{ticket.dest}</Text>
+                    <Text style={styles.cityText} numberOfLines={1}>{ticket.dest}</Text>
                     <Text style={styles.timeText}>{ticket.arrTime}</Text>
                   </View>
                 </View>
@@ -277,9 +270,9 @@ export default function LocationScreen() {
                   <View style={styles.progressDotSmall} />
                 </View>
                 <View style={styles.stationNameRow}>
-                  <Text style={styles.stationNameLabel}>สถานีศาลายา</Text>
-                  <Text style={styles.stationNameLabel}>สถานีนครปฐม</Text>
-                  <Text style={styles.stationNameLabel}>สถานีบ้านโป่ง</Text>
+                  <Text style={styles.stationNameLabel} numberOfLines={1}>{activeMapTicket?.origin}</Text>
+                  <Text style={styles.stationNameLabel}>กำลังเดินทาง</Text>
+                  <Text style={styles.stationNameLabel} numberOfLines={1}>{activeMapTicket?.dest}</Text>
                 </View>
              </SafeAreaView>
           </View>
@@ -288,21 +281,31 @@ export default function LocationScreen() {
             <MapView
               provider={PROVIDER_GOOGLE}
               style={styles.map}
+              // 🚀 ซูมออกเป็น 5.0 จะได้เห็นข้ามจังหวัด และจับโฟกัสไปที่พิกัดตั๋ว
               initialRegion={{
-                latitude: activeMapTicket?.originCoords?.latitude || location?.latitude || 13.9235,
-                longitude: activeMapTicket?.originCoords?.longitude || location?.longitude || 100.6042,
-                latitudeDelta: 0.1, // ซูมใกล้ขึ้นหน่อยจะได้เห็นชัดๆ
-                longitudeDelta: 0.1,
+                latitude: activeMapTicket?.originCoords?.latitude || location?.latitude || 13.7563,
+                longitude: activeMapTicket?.originCoords?.longitude || location?.longitude || 100.5018,
+                latitudeDelta: 5.0, 
+                longitudeDelta: 5.0,
               }}
               showsUserLocation={true}
               customMapStyle={mapStyle} 
             >
-              {/* 🚀 ลากเส้นตามพิกัดจริงที่ได้จาก Database! */}
-              {activeMapTicket && activeMapTicket.originCoords && activeMapTicket.destCoords && (
+              {/* 🚀 ลากเส้นสีม่วงตามพิกัดจริงจาก Database! */}
+              {activeMapTicket && activeMapTicket.originCoords?.latitude !== 0 && activeMapTicket.destCoords?.latitude !== 0 && (
                 <Polyline 
                   coordinates={[ activeMapTicket.originCoords, activeMapTicket.destCoords ]} 
-                  strokeColor="#5E35B1" strokeWidth={4} 
+                  strokeColor="#5E35B1" 
+                  strokeWidth={5} 
                 />
+              )}
+
+              {/* 🚀 ปักหมุดต้นทาง (แดง) และ ปลายทาง (น้ำเงิน) ให้เห็นหัวท้ายเส้นทางชัดๆ */}
+              {activeMapTicket && activeMapTicket.originCoords?.latitude !== 0 && (
+                 <Marker coordinate={activeMapTicket.originCoords} title={activeMapTicket.origin} pinColor="red" />
+              )}
+              {activeMapTicket && activeMapTicket.destCoords?.latitude !== 0 && (
+                 <Marker coordinate={activeMapTicket.destCoords} title={activeMapTicket.dest} pinColor="blue" />
               )}
             </MapView>
           </View>
@@ -311,13 +314,13 @@ export default function LocationScreen() {
              <View style={styles.mapRouteInfoRow}>
                 <View style={styles.mapInfoBox}>
                    <Text style={styles.mapLabelSub}>สถานีต้นทาง</Text>
-                   <Text style={styles.mapLabelMain}>{activeMapTicket?.origin}</Text>
+                   <Text style={styles.mapLabelMain} numberOfLines={1}>{activeMapTicket?.origin}</Text>
                    <Text style={styles.mapLabelSub}>{activeMapTicket?.depTime}</Text>
                 </View>
                 <Ionicons name="arrow-forward" size={20} color="#757575" />
                 <View style={styles.mapInfoBox}>
                    <Text style={styles.mapLabelSub}>สถานีปลายทาง</Text>
-                   <Text style={styles.mapLabelMain}>{activeMapTicket?.dest}</Text>
+                   <Text style={styles.mapLabelMain} numberOfLines={1}>{activeMapTicket?.dest}</Text>
                    <Text style={styles.mapLabelSub}>{activeMapTicket?.arrTime}</Text>
                 </View>
              </View>
@@ -325,15 +328,15 @@ export default function LocationScreen() {
              <View style={styles.mapStatsRow}>
                 <View style={styles.mapStatItem}>
                    <Text style={styles.mapLabelSub}>สถานีถัดไป</Text>
-                   <Text style={styles.mapStatValue}>สถานีบ้านโป่ง</Text>
+                   <Text style={styles.mapStatValue}>กำลังเดินทาง</Text>
                 </View>
                 <View style={styles.mapStatItem}>
-                   <Text style={styles.mapLabelSub}>ระยะทาง</Text>
-                   <Text style={styles.mapStatValue}>320 km</Text>
+                   <Text style={styles.mapLabelSub}>ขบวนรถ</Text>
+                   <Text style={styles.mapStatValue}>{activeMapTicket?.trainName}</Text>
                 </View>
                 <View style={styles.mapStatItem}>
-                   <Text style={styles.mapLabelSub}>คงเหลือ</Text>
-                   <Text style={styles.mapStatValue}>3:22 ชั่วโมง</Text>
+                   <Text style={styles.mapLabelSub}>ระยะเวลา</Text>
+                   <Text style={styles.mapStatValue}>{activeMapTicket?.duration}</Text>
                 </View>
              </View>
              
@@ -359,7 +362,7 @@ export default function LocationScreen() {
                   <TouchableOpacity onPress={() => setActiveAlertTicket(null)} style={styles.backBtnCircle}>
                     <Ionicons name="chevron-back" size={24} color="#FFF" />
                   </TouchableOpacity>
-                  <Text style={styles.modalHeaderTitle}>แจ้งเตือนสถานี</Text>
+                  <Text style={styles.modalHeaderTitleCenter}>แจ้งเตือนสถานี</Text>
                   <View style={{width: 40}} />
                 </View>
 
@@ -373,9 +376,9 @@ export default function LocationScreen() {
                   <View style={styles.progressDotSmall} />
                 </View>
                 <View style={styles.stationNameRow}>
-                  <Text style={styles.stationNameLabel}>สถานีศาลายา</Text>
-                  <Text style={styles.stationNameLabel}>สถานีนครปฐม</Text>
-                  <Text style={styles.stationNameLabel}>สถานีบ้านโป่ง</Text>
+                  <Text style={styles.stationNameLabel} numberOfLines={1}>{activeAlertTicket?.origin}</Text>
+                  <Text style={styles.stationNameLabel}>กำลังเดินทาง</Text>
+                  <Text style={styles.stationNameLabel} numberOfLines={1}>{activeAlertTicket?.dest}</Text>
                 </View>
              </SafeAreaView>
           </View>
@@ -397,21 +400,20 @@ export default function LocationScreen() {
                 <View style={styles.alertNextStationBox}>
                    <View style={styles.alertNextIcon}><Ionicons name="train" size={24} color="#5E35B1" /></View>
                    <View style={{flex: 1}}>
-                      <Text style={styles.alertLabelGrey}>สถานีถัดไป (ปลายทาง)</Text>
-                      <Text style={styles.alertStationBig}>{activeAlertTicket?.dest}</Text>
+                      <Text style={styles.alertLabelGrey}>สถานีปลายทาง</Text>
+                      <Text style={styles.alertStationBig} numberOfLines={1}>{activeAlertTicket?.dest}</Text>
                       <Text style={styles.alertLabelGrey}>{activeAlertTicket?.arrTime}</Text>
                    </View>
                    <View style={{alignItems: 'flex-end'}}>
                       <Text style={styles.alertYellowText}>อีก 20 นาที</Text>
-                      <Text style={styles.alertLabelGrey}>ชานชาลา 2</Text>
+                      <Text style={styles.alertLabelGrey}>รอลงสถานี</Text>
                    </View>
                 </View>
 
                 <View style={styles.alertActionRow}>
                    <View style={styles.alertSeatBox}>
                       <Text style={styles.alertGreenText}>ที่นั่งของคุณ</Text>
-                      <Text style={styles.alertSeatTextMain}>ที่นั่ง {activeAlertTicket?.seat} · ตู้ {activeAlertTicket?.cabin} · {activeAlertTicket?.classType}</Text>
-                      <View style={styles.alertSeatBadge}><Text style={styles.alertSeatBadgeText}>{activeAlertTicket?.seat}</Text></View>
+                      <Text style={styles.alertSeatTextMain} numberOfLines={1}>ที่นั่ง {activeAlertTicket?.seat} · ตู้ {activeAlertTicket?.cabin}</Text>
                    </View>
 
                    <TouchableOpacity style={styles.alertMapBtn} onPress={() => {
@@ -445,8 +447,6 @@ const styles = StyleSheet.create({
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10 },
   backBtnCircle: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', paddingRight: 15, borderRadius: 20 },
   headerTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 5 },
-  profileBtnCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFF' },
-  profileBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 
   scrollContent: { padding: 20, paddingTop: 30, paddingBottom: 120 },
   
@@ -479,6 +479,7 @@ const styles = StyleSheet.create({
   
   modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 },
   modalHeaderTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  modalHeaderTitleCenter: { color: '#FFF', fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginTop: -40 },
 
   stationProgressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, marginBottom: 10 },
   progressDotSmall: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#EBE4FF' },
@@ -486,22 +487,20 @@ const styles = StyleSheet.create({
   progressDotInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#FFF' },
   progressLine: { flex: 1, height: 2, backgroundColor: '#FFF', marginHorizontal: -2 },
   stationNameRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 30 },
-  stationNameLabel: { color: '#D1C4E9', fontSize: 10 },
+  stationNameLabel: { color: '#D1C4E9', fontSize: 10, maxWidth: 100, textAlign: 'center' },
 
   mapContainer: { flex: 1 },
   map: { ...StyleSheet.absoluteFillObject },
-  customMarker: { width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(244, 67, 54, 0.3)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#F44336' },
-  markerCore: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#F44336' },
 
   mapBottomCard: { backgroundColor: '#1E2046', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25, marginTop: -20 },
   mapRouteInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#3A3C59', paddingBottom: 20, marginBottom: 20 },
-  mapInfoBox: { flex: 1, alignItems: 'center', paddingVertical: 10, borderWidth: 1, borderColor: '#3A3C59', borderRadius: 15 },
+  mapInfoBox: { flex: 1, alignItems: 'center', paddingVertical: 10, borderWidth: 1, borderColor: '#3A3C59', borderRadius: 15, paddingHorizontal: 5 },
   mapLabelSub: { color: '#A8AACC', fontSize: 10, marginBottom: 2 },
-  mapLabelMain: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  mapLabelMain: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
   
   mapStatsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  mapStatItem: { flex: 1, borderWidth: 1, borderColor: '#3A3C59', borderRadius: 15, paddingVertical: 10, paddingHorizontal: 10, marginRight: 5, alignItems: 'center' },
-  mapStatValue: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginTop: 2 },
+  mapStatItem: { flex: 1, borderWidth: 1, borderColor: '#3A3C59', borderRadius: 15, paddingVertical: 10, paddingHorizontal: 5, marginRight: 5, alignItems: 'center' },
+  mapStatValue: { color: '#FFF', fontSize: 11, fontWeight: 'bold', marginTop: 2 },
 
   alertCardContainer: { flex: 1, padding: 20, marginTop: 10 },
   alertDarkCard: { backgroundColor: '#1E2046', borderRadius: 30, padding: 25, flex: 1, alignItems: 'center', elevation: 5 },
@@ -516,13 +515,13 @@ const styles = StyleSheet.create({
   alertNextStationBox: { width: '100%', flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#3A3C59', borderRadius: 20, padding: 15, marginBottom: 20 },
   alertNextIcon: { width: 45, height: 45, borderRadius: 12, backgroundColor: 'rgba(94,53,177,0.2)', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
   alertLabelGrey: { color: '#A8AACC', fontSize: 10 },
-  alertStationBig: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginVertical: 2 },
+  alertStationBig: { color: '#FFF', fontSize: 14, fontWeight: 'bold', marginVertical: 2 },
   alertYellowText: { color: '#FBC02D', fontSize: 11, fontWeight: 'bold', marginBottom: 2 },
 
   alertActionRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between' },
   alertSeatBox: { flex: 1, borderWidth: 1, borderColor: '#3A3C59', borderRadius: 20, padding: 15, marginRight: 10 },
   alertGreenText: { color: '#4CAF50', fontSize: 11, fontWeight: 'bold', marginBottom: 5 },
-  alertSeatTextMain: { color: '#FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 10 },
+  alertSeatTextMain: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginBottom: 10 },
   alertSeatBadge: { backgroundColor: '#5E35B1', alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10 },
   alertSeatBadgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
 
