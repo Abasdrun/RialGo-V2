@@ -15,7 +15,14 @@ export default function AdminTripsScreen() {
   const [isModalVisible, setModalVisible] = useState(false);
   const [selectingStation, setSelectingStation] = useState<'origin' | 'dest' | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedLine, setSelectedLine] = useState('ทั้งหมด');
+
+  // 🔔 Custom Notification State
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertMessage, setAlertMessage] = useState('');
+
+  // 🗑️ Custom Confirm Delete State
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [deleteIds, setDeleteIds] = useState<{tripId: number, trainId: number} | null>(null);
 
   const [trainType, setTrainType] = useState('รถด่วนพิเศษ'); 
   const [originId, setOriginId] = useState<number | null>(null);
@@ -28,8 +35,6 @@ export default function AdminTripsScreen() {
   const [seats, setSeats] = useState('120');
   const [status, setStatus] = useState('Scheduled');
 
-  const trainLines = ['ทั้งหมด', 'สายกลาง', 'สายเหนือ', 'สายตะวันออกเฉียงเหนือ', 'สายใต้', 'สายตะวันออก'];
-
   useFocusEffect(
     useCallback(() => {
       fetchTrips();
@@ -38,6 +43,11 @@ export default function AdminTripsScreen() {
       setDepDate(today.toISOString().split('T')[0]);
     }, [])
   );
+
+  const showCustomAlert = (msg: string) => {
+    setAlertMessage(msg);
+    setAlertVisible(true);
+  };
 
   const fetchTrips = async () => {
     setLoading(true);
@@ -60,7 +70,7 @@ export default function AdminTripsScreen() {
 
   const handleAddTrip = async () => {
     if (!originId || !destId || !depTime || !arrTime || !depDate) {
-      Alert.alert('แจ้งเตือน', 'กรุณากรอกข้อมูลเส้นทางและวันเวลาให้ครบ!');
+      showCustomAlert('กรุณากรอกข้อมูลเส้นทางและวันเวลาให้ครบ!');
       return;
     }
     try {
@@ -87,12 +97,12 @@ export default function AdminTripsScreen() {
       });
       if (tripErr) throw tripErr;
 
-      Alert.alert('สำเร็จ!', 'เพิ่มรอบรถไฟเรียบร้อยแล้ว!');
+      showCustomAlert('เพิ่มรอบรถไฟเรียบร้อยแล้ว!');
       setModalVisible(false);
       resetForm();
       fetchTrips();
     } catch (error: any) {
-      Alert.alert('เกิดข้อผิดพลาด', error.message);
+      showCustomAlert(error.message);
     } finally {
       setLoading(false);
     }
@@ -103,36 +113,30 @@ export default function AdminTripsScreen() {
     setDestId(null); setDestName('เลือกปลายทาง');
   };
 
-  const handleDeleteTrip = (id: number, trainId: number) => {
-    Alert.alert('ยืนยันการลบ', 'ลบแล้วข้อมูลจะหายไปจากระบบทันที แน่ใจหรือไม่?', [
-      { text: 'ยกเลิก', style: 'cancel' },
-      { text: 'ลบเลย', style: 'destructive', onPress: async () => {
-          await supabase.from('trips').delete().eq('id', id);
-          await supabase.from('trains').delete().eq('id', trainId);
-          fetchTrips();
-        }
-      }
-    ]);
+  // 🗑️ สั่งเปิด Modal ยืนยันการลบ
+  const handleDeleteTrip = (tripId: number, trainId: number) => {
+    setDeleteIds({ tripId, trainId });
+    setConfirmVisible(true);
   };
 
-  // 🚀 ฟังก์ชันเช็คสถานะการเดินทางแบบฉลาด (Check if Trip Date is past)
+  // 🗑️ ฟังก์ชันลบจริง
+  const confirmDelete = async () => {
+    if (deleteIds) {
+      await supabase.from('trips').delete().eq('id', deleteIds.tripId);
+      await supabase.from('trains').delete().eq('id', deleteIds.trainId);
+      setConfirmVisible(false);
+      setDeleteIds(null);
+      fetchTrips();
+    }
+  };
+
   const getDisplayStatus = (item: any) => {
     const tripDate = new Date(item.departure_date);
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // ตั้งเวลาเป็นเที่ยงคืนเพื่อเทียบแค่วันที่
-
-    // ถ้าวันที่เดินทางผ่านมาแล้ว
-    if (tripDate < today) {
-      return { label: 'สิ้นสุดการเดินทาง', bg: '#F5F5F5', color: '#9E9E9E' };
-    }
-
-    // ถ้ายังไม่ถึงวันเดินทาง เช็คตามสถานะในเบส
-    if (item.status === 'Scheduled') {
-      return { label: 'เปิดจอง', bg: '#E8F5E9', color: '#4CAF50' };
-    } else if (item.status === 'Full') {
-      return { label: 'เต็มแล้ว', bg: '#FFEBEE', color: '#F44336' };
-    }
-    
+    today.setHours(0, 0, 0, 0); 
+    if (tripDate < today) return { label: 'สิ้นสุดการเดินทาง', bg: '#F5F5F5', color: '#9E9E9E' };
+    if (item.status === 'Scheduled') return { label: 'เปิดจอง', bg: '#E8F5E9', color: '#4CAF50' };
+    else if (item.status === 'Full') return { label: 'เต็มแล้ว', bg: '#FFEBEE', color: '#F44336' };
     return { label: 'ปิดแล้ว', bg: '#ECEFF1', color: '#607D8B' };
   };
 
@@ -167,18 +171,18 @@ export default function AdminTripsScreen() {
         </View>
 
         <View style={styles.tableCard}>
-           <View style={styles.tableTh}>
-              <Text style={[styles.thText, {flex: 1}]}>วันที่</Text>
-              <Text style={[styles.thText, {flex: 2.5}]}>เส้นทาง</Text>
-              <Text style={[styles.thText, {flex: 1.5, textAlign: 'center'}]}>สถานะ</Text>
-              <Text style={[styles.thText, {flex: 1, textAlign: 'center'}]}>จัดการ</Text>
-           </View>
+            <View style={styles.tableTh}>
+               <Text style={[styles.thText, {flex: 1}]}>วันที่</Text>
+               <Text style={[styles.thText, {flex: 2.5}]}>เส้นทาง</Text>
+               <Text style={[styles.thText, {flex: 1.5, textAlign: 'center'}]}>สถานะ</Text>
+               <Text style={[styles.thText, {flex: 1, textAlign: 'center'}]}>จัดการ</Text>
+            </View>
 
-           {loading ? <ActivityIndicator color="#5E35B1" style={{margin: 20}} /> : (
+            {loading ? <ActivityIndicator color="#5E35B1" style={{margin: 20}} /> : (
               <View>
                 {trips.map((item) => {
                   const d = new Date(item.departure_date);
-                  const statusUI = getDisplayStatus(item); // 🚀 ดึงสถานะที่คำนวณแล้ว
+                  const statusUI = getDisplayStatus(item); 
                   return (
                     <View key={item.id} style={styles.tableRow}>
                       <View style={styles.dateCol}>
@@ -191,7 +195,6 @@ export default function AdminTripsScreen() {
                         <Text style={styles.trainSubText}>{item.trains?.type}</Text>
                       </View>
                       <View style={{flex: 1.5, alignItems: 'center'}}>
-                        {/* 🚀 ปรับสีป้ายสถานะตามวันเวลาที่คำนวณ */}
                         <View style={[styles.statusPill, {backgroundColor: statusUI.bg}]}>
                            <Text style={[styles.statusPillText, {color: statusUI.color}]}>
                              {statusUI.label}
@@ -205,7 +208,7 @@ export default function AdminTripsScreen() {
                   );
                 })}
               </View>
-           )}
+            )}
         </View>
       </ScrollView>
 
@@ -288,6 +291,54 @@ export default function AdminTripsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* 🔔 Modern Custom Alert Modal */}
+      <Modal visible={alertVisible} transparent animationType="fade">
+        <View style={styles.alertOverlay}>
+          <View style={styles.alertBox}>
+            <View style={styles.alertIconBg}>
+              <Ionicons name="notifications" size={30} color="#5E35B1" />
+            </View>
+            <Text style={styles.alertTitle}>แจ้งเตือน</Text>
+            <Text style={styles.alertSub}>{alertMessage}</Text>
+            <TouchableOpacity 
+              style={styles.alertConfirmBtn} 
+              onPress={() => setAlertVisible(false)}
+            >
+              <Text style={styles.alertConfirmText}>ตกลง</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 🗑️ Modern Confirm Delete Modal */}
+      <Modal visible={confirmVisible} transparent animationType="fade">
+        <View style={styles.alertOverlay}>
+          <View style={styles.alertBox}>
+            <View style={[styles.alertIconBg, {backgroundColor: '#FFEBEE'}]}>
+              <Ionicons name="trash-outline" size={30} color="#F44336" />
+            </View>
+            <Text style={styles.alertTitle}>ยืนยันการลบ</Text>
+            <Text style={styles.alertSub}>ลบแล้วข้อมูลจะหายไปจากระบบทันที แน่ใจหรือไม่?</Text>
+            
+            <View style={{flexDirection: 'row', width: '100%'}}>
+              <TouchableOpacity 
+                style={[styles.alertConfirmBtn, {flex: 1, backgroundColor: '#F5F5F5', marginRight: 10}]} 
+                onPress={() => setConfirmVisible(false)}
+              >
+                <Text style={[styles.alertConfirmText, {color: '#757575'}]}>ยกเลิก</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.alertConfirmBtn, {flex: 1, backgroundColor: '#F44336'}]} 
+                onPress={confirmDelete}
+              >
+                <Text style={styles.alertConfirmText}>ลบเลย</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -347,4 +398,23 @@ const styles = StyleSheet.create({
   newStationSub: { fontSize: 11, color: '#9E9E9E', marginTop: 2 },
   lineBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
   lineBadgeText: { fontSize: 10, fontWeight: 'bold' },
+  
+  // 🔔 Common Alert Styles
+  alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  alertBox: {
+    width: width * 0.8,
+    backgroundColor: '#FFF',
+    borderRadius: 30,
+    padding: 25,
+    alignItems: 'center',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.3, shadowRadius: 10,
+  },
+  alertIconBg: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#F0E7FF', justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
+  alertTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 8 },
+  alertSub: { fontSize: 14, color: '#757575', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
+  alertConfirmBtn: { backgroundColor: '#5E35B1', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 15, width: '100%', alignItems: 'center' },
+  alertConfirmText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
 });

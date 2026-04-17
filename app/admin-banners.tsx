@@ -1,11 +1,22 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Image, TextInput, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Image, TextInput, Modal, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from '../supabase';
+
+// 🟦 1. TypeScript Interface สำหรับ Modal แจ้งเตือน
+interface AlertConfig {
+  visible: boolean;
+  type: 'success' | 'warning' | 'error';
+  title: string;
+  message: string;
+  confirmText?: string;
+  showCancel?: boolean;
+  onConfirm?: () => void;
+}
 
 // 📌 กำหนด 6 ช่องตายตัวของระบบ
 const FIXED_SLOTS = [
@@ -23,18 +34,25 @@ export default function AdminBannersScreen() {
   
   // 🟢 States สำหรับ Modal อัปโหลด/แก้ไข
   const [isModalVisible, setModalVisible] = useState(false);
-  const [activeSlot, setActiveSlot] = useState<any>(null); // จำว่ากำลังแก้ช่องไหน
-  const [editingId, setEditingId] = useState<number | null>(null); // จำ ID ในฐานข้อมูล (ถ้ามี)
+  const [activeSlot, setActiveSlot] = useState<any>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
 
   // ข้อมูลในฟอร์ม
   const [title, setTitle] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
   const [isActive, setIsActive] = useState(true);
-  
-  // จัดการรูปภาพ
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [base64Image, setBase64Image] = useState<string | null>(null);
+
+  // 🟦 2. State สำหรับ Modern Alert Modal
+  const [alertConfig, setAlertConfig] = useState<AlertConfig>({
+    visible: false,
+    type: 'warning',
+    title: '',
+    message: '',
+    confirmText: 'ตกลง',
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -50,15 +68,23 @@ export default function AdminBannersScreen() {
     setLoading(false);
   };
 
-  // 📸 เปิดอัลบั้มเลือกรูป
+  // ฟังก์ชันเรียก Alert
+  const showAlert = (config: Omit<AlertConfig, 'visible'>) => {
+    setAlertConfig({ ...config, visible: true });
+  };
+
+  const closeAlert = () => {
+    setAlertConfig(prev => ({ ...prev, visible: false }));
+  };
+
+  // 📸 เลือกรูป
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('แจ้งเตือน', 'กรุณาอนุญาตให้แอปเข้าถึงรูปภาพครับ');
+      showAlert({ type: 'error', title: 'การเข้าถึงถูกปฏิเสธ', message: 'กรุณาอนุญาตให้เข้าถึงรูปภาพในตั้งค่า' });
       return;
     }
 
-    // กำหนดสัดส่วนตาม Slot
     let aspect: [number, number] = [16, 9];
     if (activeSlot?.id === 'grid_left_bottom') aspect = [16, 8];
     if (activeSlot?.id === 'grid_right') aspect = [9, 16];
@@ -77,14 +103,14 @@ export default function AdminBannersScreen() {
     }
   };
 
-  // 💾 บันทึกข้อมูลเฉพาะ Slot นั้นๆ
+  // 💾 บันทึกข้อมูล
   const handleSaveBanner = async () => {
     if (!title) {
-      Alert.alert('แจ้งเตือน', 'กรุณากรอกชื่อแบนเนอร์');
+      showAlert({ type: 'warning', title: 'ข้อมูลไม่ครบ', message: 'กรุณากรอกชื่อแบนเนอร์' });
       return;
     }
     if (!editingId && !base64Image) {
-      Alert.alert('แจ้งเตือน', 'กรุณาอัปโหลดรูปภาพ');
+      showAlert({ type: 'warning', title: 'รูปภาพว่าง', message: 'กรุณาอัปโหลดรูปภาพ' });
       return;
     }
 
@@ -92,7 +118,6 @@ export default function AdminBannersScreen() {
       setUploading(true);
       let finalImageUrl = previewImage; 
 
-      // อัปโหลดรูปใหม่
       if (base64Image) {
         const fileName = `${activeSlot.id}_${new Date().getTime()}.jpg`;
         const { error: uploadError } = await supabase.storage
@@ -105,7 +130,6 @@ export default function AdminBannersScreen() {
         finalImageUrl = data.publicUrl;
       }
 
-      // เตรียมข้อมูลยัดลงตาราง
       const payload = {
         slot_name: activeSlot.id,
         title: title,
@@ -115,31 +139,35 @@ export default function AdminBannersScreen() {
       };
 
       if (editingId) {
-        // อัปเดตช่องเดิมที่มีอยู่แล้ว
         const { error } = await supabase.from('banners').update(payload).eq('id', editingId);
         if (error) throw error;
-        Alert.alert('สำเร็จ', `อัปเดต ${activeSlot.name} เรียบร้อย!`);
+        setModalVisible(false);
+        showAlert({ 
+          type: 'success', 
+          title: 'สำเร็จ', 
+          message: `อัปเดต ${activeSlot.name} เรียบร้อย!`,
+          onConfirm: () => { closeAlert(); fetchBanners(); }
+        });
       } else {
-        // สร้างข้อมูลใหม่สำหรับช่องนี้
         const { error } = await supabase.from('banners').insert(payload);
         if (error) throw error;
-        Alert.alert('สำเร็จ', `อัปโหลด ${activeSlot.name} เรียบร้อย!`);
+        setModalVisible(false);
+        showAlert({ 
+          type: 'success', 
+          title: 'สำเร็จ', 
+          message: `อัปโหลด ${activeSlot.name} เรียบร้อย!`,
+          onConfirm: () => { closeAlert(); fetchBanners(); }
+        });
       }
-
-      closeModal();
-      fetchBanners();
-
     } catch (error: any) {
-      Alert.alert('เกิดข้อผิดพลาด', error.message);
+      showAlert({ type: 'error', title: 'เกิดข้อผิดพลาด', message: error.message });
     } finally {
       setUploading(false);
     }
   };
 
-  // 🖊️ เปิด Modal สำหรับช่องที่เลือก
   const openModalForSlot = (slotDef: any, existingData: any) => {
     setActiveSlot(slotDef);
-    
     if (existingData) {
       setEditingId(existingData.id);
       setTitle(existingData.title || slotDef.name);
@@ -148,12 +176,11 @@ export default function AdminBannersScreen() {
       setPreviewImage(existingData.image_url);
     } else {
       setEditingId(null);
-      setTitle(slotDef.name); // ตั้งชื่อปริยายให้เลย
+      setTitle(slotDef.name);
       setLinkUrl('');
       setIsActive(true);
       setPreviewImage(null);
     }
-    
     setBase64Image(null);
     setModalVisible(true);
   };
@@ -165,23 +192,26 @@ export default function AdminBannersScreen() {
     setPreviewImage(null); setBase64Image(null);
   };
 
-  // 🗑️ ลบรูปออกจากช่อง (จริงๆ คือลบแถวทิ้งไปเลย ให้มันกลับเป็นกล่องว่าง)
+  // 🗑️ ลบรูป (เปลี่ยนจาก Alert.alert เป็น Modern Alert)
   const handleDelete = (id: number, slotName: string) => {
-    Alert.alert('ยืนยันการลบ', `เคลียร์รูปภาพจากช่อง ${slotName} ใช่หรือไม่?`, [
-      { text: 'ยกเลิก', style: 'cancel' },
-      { text: 'ลบ', style: 'destructive', onPress: async () => {
-          await supabase.from('banners').delete().eq('id', id);
-          fetchBanners();
-        } 
+    showAlert({
+      type: 'warning',
+      title: 'ยืนยันการลบ',
+      message: `คุณต้องการลบรูปภาพจากช่อง ${slotName} ใช่หรือไม่?`,
+      confirmText: 'ลบรูปภาพ',
+      showCancel: true,
+      onConfirm: async () => {
+        closeAlert();
+        await supabase.from('banners').delete().eq('id', id);
+        fetchBanners();
       }
-    ]);
+    });
   };
 
-  // 📝 เรนเดอร์การ์ด 6 ช่อง
+  // 📝 เรนเดอร์การ์ด
   const renderSlotCard = (slotDef: any) => {
     const existingData = banners.find(b => b.slot_name === slotDef.id);
 
-    // ถ้ายังไม่มีรูป (กล่องเปล่าๆ)
     if (!existingData || !existingData.image_url) {
       return (
         <TouchableOpacity key={slotDef.id} style={styles.emptyCard} onPress={() => openModalForSlot(slotDef, null)}>
@@ -194,17 +224,14 @@ export default function AdminBannersScreen() {
       );
     }
 
-    // ถ้ามีรูปลงช่องแล้ว
     const dateStr = existingData.created_at ? new Date(existingData.created_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : 'ล่าสุด';
 
     return (
       <View key={slotDef.id} style={styles.bannerCard}>
         <Image source={{ uri: existingData.image_url }} style={styles.bannerImage} />
-        
         <View style={styles.bannerContent}>
           <Text style={styles.bannerTitle} numberOfLines={1}>{existingData.title || slotDef.name}</Text>
           <Text style={styles.slotBadgeText}>{slotDef.name}</Text>
-          
           <View style={styles.bannerMetaRow}>
             <View style={[styles.statusBadge, {backgroundColor: existingData.is_active !== false ? '#EBE4FF' : '#F5F5F5'}]}>
               <Text style={[styles.statusText, {color: existingData.is_active !== false ? '#5E35B1' : '#9E9E9E'}]}>
@@ -213,7 +240,6 @@ export default function AdminBannersScreen() {
             </View>
             <Text style={styles.dateText}>อัปโหลด {dateStr}</Text>
           </View>
-
           <View style={styles.cardActions}>
             <TouchableOpacity style={styles.editBtn} onPress={() => openModalForSlot(slotDef, existingData)}>
               <Text style={styles.editBtnText}>แก้ไข</Text>
@@ -229,28 +255,21 @@ export default function AdminBannersScreen() {
 
   return (
     <View style={styles.container}>
-      
-      {/* 👑 Header โค้งสีน้ำเงิน (อยู่หลังสุด) */}
-      <View style={styles.headerBg}>
-        <View style={styles.headerCurve} />
-      </View>
+      <View style={styles.headerBg} />
 
-      {/* 👑 ส่วนหัวที่มีปุ่มย้อนกลับ (ดึงมาหน้าสุด zIndex 10 จะได้กดติดชัวร์ๆ) */}
       <SafeAreaView edges={['top']} style={{ zIndex: 10 }}>
         <View style={styles.headerTopRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}>
+          <TouchableOpacity activeOpacity={0.7} onPress={() => router.back()} style={styles.backBtnCircle}>
             <Ionicons name="chevron-back" size={24} color="#FFF" />
           </TouchableOpacity>
           <View style={{flex: 1, marginLeft: 15}}>
             <Text style={styles.headerTitle}>จัดการแบนเนอร์</Text>
             <Text style={styles.headerSub}>เปลี่ยนรูปข่าวสารบนหน้า Home (ระบบ 6 ช่อง)</Text>
           </View>
-          {/* ลบปุ่มวงกลมตัว A ออกแล้ว */}
         </View>
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
         <View style={styles.warningBox}>
           <Ionicons name="warning-outline" size={20} color="#F57F17" style={{marginTop: 2}} />
           <View style={{marginLeft: 10, flex: 1}}>
@@ -269,12 +288,44 @@ export default function AdminBannersScreen() {
         )}
       </ScrollView>
 
-      {/* 📝 Modal ฟอร์มสร้าง/แก้ไข (สำหรับ Slot ที่เลือก) */}
+      {/* 🟦 Modern Alert Modal (เพิ่มใหม่) */}
+      <Modal animationType="fade" transparent visible={alertConfig.visible}>
+        <View style={styles.alertOverlay}>
+          <View style={styles.alertContainer}>
+            <View style={[styles.alertIconCircle, 
+              alertConfig.type === 'success' ? {backgroundColor: '#E8F5E9'} : 
+              alertConfig.type === 'error' ? {backgroundColor: '#FFEBEE'} : {backgroundColor: '#FFF8E1'}
+            ]}>
+              <Ionicons 
+                name={alertConfig.type === 'success' ? 'checkmark-circle' : alertConfig.type === 'error' ? 'alert-circle' : 'warning'} 
+                size={40} 
+                color={alertConfig.type === 'success' ? '#4CAF50' : alertConfig.type === 'error' ? '#EF5350' : '#FFB300'} 
+              />
+            </View>
+            <Text style={styles.alertTitle}>{alertConfig.title}</Text>
+            <Text style={styles.alertMessage}>{alertConfig.message}</Text>
+            <View style={styles.alertActionRow}>
+              {alertConfig.showCancel && (
+                <TouchableOpacity style={styles.alertCancelBtn} onPress={closeAlert}>
+                  <Text style={styles.alertCancelText}>ยกเลิก</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity 
+                style={[styles.alertConfirmBtn, !alertConfig.showCancel ? {flex: 1} : {flex: 1}]} 
+                onPress={alertConfig.onConfirm || closeAlert}
+              >
+                <Text style={styles.alertConfirmText}>{alertConfig.confirmText || 'ตกลง'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 🟦 Input Form Modal */}
       <Modal visible={isModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <ScrollView showsVerticalScrollIndicator={false}>
-              
               <View style={styles.modalHeader}>
                 <View>
                   <Text style={styles.modalTitle}>{editingId ? 'แก้ไขแบนเนอร์' : 'ตั้งค่าแบนเนอร์ใหม่'}</Text>
@@ -286,14 +337,13 @@ export default function AdminBannersScreen() {
               <Text style={styles.label}>ชื่อแบนเนอร์ / แคมเปญ</Text>
               <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="เช่น โปรโมชั่นสงกรานต์" placeholderTextColor="#BDBDBD" />
 
-              {/* 🖼️ กล่องอัปโหลดรูปภาพ */}
               <TouchableOpacity style={styles.uploadDropzone} onPress={pickImage}>
                 {previewImage ? (
                   <Image source={{ uri: previewImage }} style={styles.previewImg} />
                 ) : (
                   <View style={{alignItems: 'center'}}>
                     <Ionicons name="image-outline" size={40} color="#BDBDBD" />
-                    <Text style={styles.dropzoneTitle}>คลิกหรือลากไฟล์มาวางที่นี่</Text>
+                    <Text style={styles.dropzoneTitle}>คลิกเพื่อเลือกรูปภาพ</Text>
                     <Text style={styles.dropzoneSub}>PNG, JPG, WebP - ไม่เกิน 2MB</Text>
                   </View>
                 )}
@@ -312,7 +362,6 @@ export default function AdminBannersScreen() {
                  </TouchableOpacity>
               </View>
 
-              {/* ปุ่มบันทึก / ยกเลิก */}
               <View style={styles.modalActionRow}>
                 <TouchableOpacity style={styles.cancelBtn} onPress={closeModal}>
                   <Text style={styles.cancelBtnText}>ยกเลิก</Text>
@@ -326,83 +375,73 @@ export default function AdminBannersScreen() {
                   )}
                 </TouchableOpacity>
               </View>
-
             </ScrollView>
           </View>
         </View>
       </Modal>
-
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F4F6F9' },
-  
-  // Header
-  headerBg: { backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, position: 'absolute', top: 0, left: 0, right: 0, height: 180, overflow: 'hidden', zIndex: 0 },
-  headerCurve: { position: 'absolute', top: -50, right: -50, width: 250, height: 250, borderRadius: 125, backgroundColor: 'rgba(255,255,255,0.05)' },
+  headerBg: { backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, position: 'absolute', top: 0, left: 0, right: 0, height: 180, zIndex: 0 },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10 },
-  backBtnCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  backBtnCircle: { width: 45, height: 45, borderRadius: 22.5, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   headerSub: { color: '#B0B2C3', fontSize: 12, marginTop: 2 },
-
   scrollContent: { padding: 20, paddingTop: 90, paddingBottom: 50 },
-
-  // Warning Box
   warningBox: { flexDirection: 'row', backgroundColor: '#FFF9E6', borderWidth: 1, borderColor: '#FFD54F', padding: 15, borderRadius: 15, marginBottom: 20 },
   warningTitle: { color: '#F57F17', fontSize: 12, fontWeight: 'bold', marginBottom: 2 },
   warningDesc: { color: '#F57F17', fontSize: 10, lineHeight: 16 },
-
-  // Grid
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  
-  // Empty Card (Placeholder)
   emptyCard: { width: '48%', backgroundColor: '#F8F9FA', borderRadius: 15, marginBottom: 15, height: 180, borderWidth: 2, borderColor: '#E0E0E0', borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center' },
   emptyContent: { alignItems: 'center', padding: 10 },
   emptyTitle: { fontSize: 11, fontWeight: 'bold', color: '#333', marginTop: 10, textAlign: 'center' },
   emptySub: { fontSize: 9, color: '#9E9E9E', marginTop: 2 },
-
-  // Filled Card
   bannerCard: { width: '48%', backgroundColor: '#FFF', borderRadius: 15, marginBottom: 15, elevation: 2, overflow: 'hidden', borderWidth: 1, borderColor: '#EEEEEE' },
   bannerImage: { width: '100%', height: 90, backgroundColor: '#E0E0E0' },
   bannerContent: { padding: 12 },
   bannerTitle: { fontSize: 11, fontWeight: 'bold', color: '#333', marginBottom: 2 },
-  slotBadgeText: { fontSize: 9, color: '#FF9800', fontWeight: 'bold', marginBottom: 8 }, // ป้ายบอกชื่อช่อง
-  
+  slotBadgeText: { fontSize: 9, color: '#FF9800', fontWeight: 'bold', marginBottom: 8 },
   bannerMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   statusText: { fontSize: 9, fontWeight: 'bold' },
   dateText: { fontSize: 9, color: '#9E9E9E' },
-  
   cardActions: { flexDirection: 'row', justifyContent: 'space-between' },
   editBtn: { flex: 1, borderWidth: 1, borderColor: '#E0E0E0', paddingVertical: 6, borderRadius: 8, alignItems: 'center', marginRight: 5 },
   editBtnText: { color: '#757575', fontSize: 10, fontWeight: 'bold' },
   deleteBtn: { flex: 1, backgroundColor: '#FFEBEE', paddingVertical: 6, borderRadius: 8, alignItems: 'center' },
   deleteBtnText: { color: '#F44336', fontSize: 10, fontWeight: 'bold' },
 
-  // Modal สว่าง
+  // Modern Alert Modal
+  alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 30 },
+  alertContainer: { width: '100%', backgroundColor: '#FFF', borderRadius: 25, padding: 25, alignItems: 'center', elevation: 10 },
+  alertIconCircle: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  alertTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', marginBottom: 10 },
+  alertMessage: { fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 22, marginBottom: 25 },
+  alertActionRow: { flexDirection: 'row', width: '100%', gap: 10, justifyContent: 'center', alignItems: 'center' },
+  alertCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 15, backgroundColor: '#F5F5F5', alignItems: 'center' },
+  alertCancelText: { color: '#757575', fontWeight: 'bold' },
+  alertConfirmBtn: { paddingVertical: 14, borderRadius: 15, backgroundColor: '#5E35B1', justifyContent: 'center', alignItems: 'center', minWidth: 120 },
+  alertConfirmText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+
+  // Input Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { color: '#333', fontSize: 18, fontWeight: 'bold' },
   modalSubTitle: { color: '#FF9800', fontSize: 12, fontWeight: 'bold', marginTop: 2 },
-  
   label: { color: '#333', fontSize: 12, fontWeight: 'bold', marginBottom: 8, marginTop: 10 },
   input: { backgroundColor: '#FFF', color: '#333', height: 45, borderRadius: 12, paddingHorizontal: 15, borderWidth: 1, borderColor: '#E0E0E0', marginBottom: 10, fontSize: 13 },
-  
   uploadDropzone: { backgroundColor: '#F8F9FA', borderWidth: 2, borderColor: '#E0E0E0', borderStyle: 'dashed', borderRadius: 15, height: 160, justifyContent: 'center', alignItems: 'center', marginBottom: 15, overflow: 'hidden' },
   previewImg: { width: '100%', height: '100%', resizeMode: 'cover' },
   dropzoneTitle: { color: '#333', fontSize: 13, fontWeight: 'bold', marginTop: 10 },
   dropzoneSub: { color: '#9E9E9E', fontSize: 10, marginTop: 5 },
-
   rowGrid: { flexDirection: 'row', justifyContent: 'space-between' },
-  colHalf: { width: '100%' },
-
   statusToggleBtn: { flex: 1, borderWidth: 1, borderColor: '#E0E0E0', paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginHorizontal: 4 },
   statusToggleActive: { backgroundColor: '#F3E5F5', borderColor: '#5E35B1' },
   statusToggleText: { fontSize: 12, fontWeight: 'bold', color: '#757575' },
-
   modalActionRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 30, marginBottom: 20 },
   cancelBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E0E0E0', marginRight: 10 },
   cancelBtnText: { color: '#757575', fontSize: 13, fontWeight: 'bold' },
