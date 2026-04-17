@@ -284,3 +284,4 @@ const styles = StyleSheet.create({
   navItem: { alignItems: 'center', justifyContent: 'center' },
   navText: { fontSize: 10, fontWeight: 'bold', color: '#333', marginTop: 4 },
 });
+
