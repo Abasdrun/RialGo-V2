@@ -50,7 +50,7 @@ export default function ProfileScreen() {
       }
     };
 
-    // 📸 แก้ไขฟังก์ชันเลือกรูปให้บันทึกถาวร
+    // 📸 แก้ไขฟังก์ชันเลือกรูปให้บันทึกถาวร และทะลวงแคช
     const pickImage = async () => {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
@@ -87,11 +87,15 @@ export default function ProfileScreen() {
           // 2. ดึง Public URL มาบันทึก
           const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(`public/${fileName}`);
 
-          // 3. บันทึกลงตาราง profiles และ Auth Metadata
-          await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id);
-          await supabase.auth.updateUser({ data: { avatar_url: publicUrl } });
+          // 🚀 2.5 เติม timestamp ต่อท้ายลิงก์ เพื่อหลอกให้มือถือโหลดรูปใหม่! (จุดที่แก้ให้)
+          const newAvatarUrl = `${publicUrl}?t=${new Date().getTime()}`;
 
-          setProfileImage(publicUrl);
+          // 3. บันทึกลงตาราง profiles และ Auth Metadata (ใช้ลิงก์ใหม่)
+          await supabase.from('profiles').update({ avatar_url: newAvatarUrl }).eq('id', user.id);
+          await supabase.auth.updateUser({ data: { avatar_url: newAvatarUrl } });
+
+          // 🚀 เซ็ต state ให้หน้าจอโชว์รูปใหม่ทันที
+          setProfileImage(newAvatarUrl);
           Alert.alert('สำเร็จ', 'อัปเดตรูปโปรไฟล์เรียบร้อยแล้ว ✨');
 
         } catch (error: any) {
