@@ -11,7 +11,6 @@ export default function SelectSeatScreen() {
   const params = useLocalSearchParams();
   const { origin, destination, departureDate, trainType, cabinClass, cabinNumber: initialCabin, adults, children, infants, depTime, arrTime, duration, trip_id } = params;
 
-  // 🚀 LOGIC เช็คว่าเป็นขากลับไหม จะได้หาระยะทางและข้อมูลถูก
   const isReturn = params.isReturnLeg === 'true';
   const isRoundTrip = params.tripType === 'round-trip';
   const currentOrigin = isReturn ? String(destination) : String(origin);
@@ -23,7 +22,27 @@ export default function SelectSeatScreen() {
   const [bookedSeats, setBookedSeats] = useState<string[]>([]); 
   const [distance, setDistance] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [currentCabinNum, setCurrentCabinNum] = useState(String(initialCabin));
+
+  // 🚀 FIXED: ฟังก์ชันดึงเลขตู้ (แก้ตรรกะให้เช็ควีลแชร์ก่อนชั้น 2)
+  const getNumberOptions = () => {
+    const cClass = String(cabinClass);
+    if (trainType === 'รถด่วนพิเศษ') {
+      if (cClass.includes('วีลแชร์') || cClass.includes('ผู้พิการ')) return [6];
+      if (cClass.includes('ชั้น 1')) return [11];
+      return [1, 2, 3, 4, 5, 7, 8, 9, 10]; // นอกนั้นเหมาเป็นชั้น 2 ปกติ
+    } else {
+      if (cClass.includes('ชั้น 3')) return [5, 6, 7, 8, 9, 10, 11];
+      if (cClass.includes('นั่งปรับอากาศ') && !cClass.includes('ตู้นอน')) return [3, 4];
+      return [1, 2]; // ตู้นอนชั้น 2
+    }
+  };
+
+  const validCabins = getNumberOptions();
+
+  // 🚀 FIXED: ถ้ารับเลขตู้จากหน้าแรกมาแล้วมันมั่ว (เช่น รับตู้ 1 มาแต่มันเป็นวีลแชร์) มันจะเปลี่ยนเป็นตู้ 6 ให้เลย
+  const [currentCabinNum, setCurrentCabinNum] = useState(
+    validCabins.includes(Number(initialCabin)) ? String(initialCabin) : String(validCabins[0])
+  );
 
   const [alertConfig, setAlertConfig] = useState({ visible: false, title: '', message: '' });
 
@@ -60,6 +79,36 @@ export default function SelectSeatScreen() {
   const showAlert = (title: string, message: string) => {
     setAlertConfig({ visible: true, title, message });
   };
+
+  const getSeatLayoutConfig = () => {
+    let total = 48;
+    const tType = String(trainType);
+    const cClass = String(cabinClass);
+
+    if (tType === 'รถด่วนพิเศษ') {
+      if (cClass.includes('ชั้น 1')) total = 24;
+      else if (cClass.includes('วีลแชร์') || cClass.includes('ผู้พิการ')) total = 36;
+      else total = 40; 
+    } else {
+      if (cClass.includes('ชั้น 3')) total = 76;
+      else if (cClass.includes('นั่งปรับอากาศ') && !cClass.includes('ตู้นอน')) total = 72;
+      else if (cClass.includes('ตู้นอน')) total = 40;
+      else total = 48; 
+    }
+
+    const leftCol = [];
+    const rightCol = [];
+    for (let i = 1; i <= total; i += 4) {
+      leftCol.push(i);
+      if (i + 2 <= total) {
+        rightCol.push(i + 2);
+      }
+    }
+
+    return { total, leftCol, rightCol, isSleeper: cClass.includes('ตู้นอน') || cClass.includes('ชั้น 1') || cClass.includes('ชั้น 2') };
+  };
+
+  const { total: totalSeatsInCabin, leftCol, rightCol, isSleeper } = getSeatLayoutConfig();
 
   const calculateSeatPrice = (seatId: string) => {
     const [cabin, seatNumStr] = seatId.split('-');
@@ -109,18 +158,6 @@ export default function SelectSeatScreen() {
     }
   };
 
-  const getNumberOptions = () => {
-    if (trainType === 'รถด่วนพิเศษ') {
-      if (String(cabinClass) === 'ตู้นอนปรับอากาศ ชั้น 2') return [1, 2, 3, 4, 5, 7, 8, 9, 10];
-      if (String(cabinClass).includes('วีลแชร์')) return [6];
-      return [11];
-    } else {
-      if (String(cabinClass) === 'ตู้นั่งพัดลม ชั้น 3') return [5, 6, 7, 8, 9, 10, 11];
-      if (String(cabinClass).includes('นั่งปรับอากาศ')) return [3, 4];
-      return [1, 2];
-    }
-  };
-
   const renderSeat = (num: number) => {
     const seatId = `${currentCabinNum}-${num}`;
     const isSelected = selectedSeats.includes(seatId);
@@ -141,8 +178,6 @@ export default function SelectSeatScreen() {
     );
   };
 
-  const isSleeper = String(cabinClass).includes('ตู้นอน');
-  const totalSeatsInCabin = 48;
   const bookedInThisCabin = bookedSeats.filter(s => s.startsWith(`${currentCabinNum}-`)).length;
   const selectedInThisCabin = selectedSeats.filter(s => s.startsWith(`${currentCabinNum}-`)).length;
   const availableSeatsCount = totalSeatsInCabin - bookedInThisCabin - selectedInThisCabin;
@@ -151,13 +186,12 @@ export default function SelectSeatScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      
       <View style={styles.blueHeaderBg}>
         <View style={styles.headerTopRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}>
             <Ionicons name="chevron-back" size={24} color="#FFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>ขบวน{trainType} {isReturn && '(ขากลับ)'}</Text>
+          <Text style={styles.headerTitle}>ขบวน{trainType}</Text>
           <View style={{width: 40}} />
         </View>
 
@@ -180,7 +214,7 @@ export default function SelectSeatScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.cabinTabsWrapper}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {getNumberOptions().map(num => (
+            {validCabins.map(num => (
               <TouchableOpacity 
                 key={num} 
                 style={[styles.cabinTabBtn, currentCabinNum === String(num) && styles.cabinTabBtnActive]}
@@ -213,10 +247,10 @@ export default function SelectSeatScreen() {
                   <Text style={styles.colHeaderText}>ชั้นบน</Text>
                 </View>
               )}
-              {[1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45].map(n => (
+              {leftCol.map(n => (
                 <View key={n} style={styles.seatPairRow}>
                   {renderSeat(n)}
-                  {renderSeat(n+1)}
+                  {n + 1 <= totalSeatsInCabin && renderSeat(n+1)}
                 </View>
               ))}
             </View>
@@ -232,10 +266,10 @@ export default function SelectSeatScreen() {
                   <Text style={styles.colHeaderText}>ชั้นบน</Text>
                 </View>
               )}
-              {[3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47].map(n => (
+              {rightCol.map(n => (
                 <View key={n} style={styles.seatPairRow}>
                   {renderSeat(n)}
-                  {renderSeat(n+1)}
+                  {n + 1 <= totalSeatsInCabin && renderSeat(n+1)}
                 </View>
               ))}
             </View>
@@ -255,9 +289,7 @@ export default function SelectSeatScreen() {
            <View style={{flex: 1, paddingRight: 10}}>
               <Text style={styles.footerLabel}>ที่นั่งที่เลือก</Text>
               <Text style={styles.footerValue} numberOfLines={1}>
-                {selectedSeats.length > 0 
-                  ? selectedSeats.map(s => s.replace('-', ': ')).join(', ') 
-                  : '-'}
+                {selectedSeats.length > 0 ? selectedSeats.map(s => s.replace('-', ': ')).join(', ') : '-'}
               </Text>
            </View>
            <View style={{alignItems: 'flex-end'}}>
@@ -265,8 +297,6 @@ export default function SelectSeatScreen() {
               <Text style={styles.footerPrice}>THB {getTotalPrice().toLocaleString('en-US', {minimumFractionDigits: 2})}</Text>
            </View>
         </View>
-        
-        {/* 🚀 LOGIC พระเอก: ไปหน้า Summary หรือ เด้งไปเลือกขากลับ */}
         <TouchableOpacity 
             style={[styles.confirmBtn, selectedSeats.length !== totalPax && {backgroundColor: '#9E9E9E'}]}
             disabled={selectedSeats.length !== totalPax}
@@ -300,9 +330,7 @@ export default function SelectSeatScreen() {
             }}
         >
             <Ionicons name={isRoundTrip && !isReturn ? "arrow-forward" : "checkmark"} size={20} color="#FFF" style={{marginRight: 10}} />
-            <Text style={styles.confirmBtnText}>
-              {isRoundTrip && !isReturn ? 'ยืนยัน และ เลือกเที่ยวกลับ' : `ยืนยันที่นั่ง ${selectedSeats.length} นั่ง`}
-            </Text>
+            <Text style={styles.confirmBtnText}>{isRoundTrip && !isReturn ? 'ยืนยัน และ เลือกเที่ยวกลับ' : `ยืนยันที่นั่ง ${selectedSeats.length} นั่ง`}</Text>
         </TouchableOpacity>
       </View>
 

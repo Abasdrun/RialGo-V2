@@ -56,17 +56,27 @@ export default function BookTicketScreen() {
       : ['ตู้นั่งพัดลม ชั้น 3', 'ตู้นั่งปรับอากาศ / พัดลม ชั้น 2', 'ตู้นอนปรับอากาศ ชั้น 2'];
   };
 
+  // 🚀 FIXED: แก้ลำดับการเช็ค เงื่อนไขไหนเฉพาะเจาะจงต้องเช็คก่อน (วีลแชร์มาก่อนชั้น 2)
   const getNumberOptions = () => {
+    const cClass = String(cabinClass);
     if (trainType === 'รถด่วนพิเศษ') {
-      if (cabinClass === 'ตู้นอนปรับอากาศ ชั้น 2') return [1, 2, 3, 4, 5, 7, 8, 9, 10];
-      if (cabinClass.includes('วีลแชร์')) return [6];
-      return [11];
+      if (cClass.includes('วีลแชร์') || cClass.includes('ผู้พิการ')) return [6];
+      if (cClass.includes('ชั้น 1')) return [11];
+      return [1, 2, 3, 4, 5, 7, 8, 9, 10]; // นอกนั้นถือเป็นชั้น 2 ปกติ
     } else {
-      if (cabinClass === 'ตู้นั่งพัดลม ชั้น 3') return [5, 6, 7, 8, 9, 10, 11];
-      if (cabinClass.includes('นั่งปรับอากาศ')) return [3, 4];
-      return [1, 2];
+      if (cClass.includes('ชั้น 3')) return [5, 6, 7, 8, 9, 10, 11];
+      if (cClass.includes('นั่งปรับอากาศ') && !cClass.includes('ตู้นอน')) return [3, 4];
+      return [1, 2]; // ตู้นอนชั้น 2 ของรถเร็ว
     }
   };
+
+  // 🚀 FIXED: ตัวเฝ้าดู ถ้าเปลี่ยนคลาสแล้วเลขตู้ปัจจุบันไม่มีในลิสต์ มันจะเด้งไปเลขแรกทันที!
+  useEffect(() => {
+    const validOptions = getNumberOptions();
+    if (!validOptions.includes(Number(cabinNumber))) {
+      setCabinNumber(String(validOptions[0]));
+    }
+  }, [trainType, cabinClass]);
 
   const getSingleMonthData = (offset: number) => {
     const now = new Date();
@@ -155,13 +165,12 @@ export default function BookTicketScreen() {
       return [newSearch, ...filtered].slice(0, 5); 
     });
 
-    // 🚀 เพิ่มส่งข้อมูลชุดนี้ไปให้ครบ!
     router.push({
       pathname: '/(booking)/search-results',
       params: { 
         origin, destination, departureDate, returnDate, tripType, trainType, cabinClass, cabinNumber, 
         adults: passengers.adult, children: passengers.child, infants: passengers.infant,
-        isReturnLeg: 'false' // 🚩 บอกว่าเป็นขาไปนะ 
+        isReturnLeg: 'false'
       }
     });
   };
@@ -548,7 +557,10 @@ export default function BookTicketScreen() {
                       if(activeModal === 'trainType') { 
                         setTrainType(opt); 
                         setCabinClass(opt==='รถเร็ว' ? 'ตู้นั่งพัดลม ชั้น 3' : 'ตู้นอนปรับอากาศ ชั้น 2'); 
-                      } else { setCabinClass(opt); } setActiveModal(null); 
+                      } else { 
+                        setCabinClass(opt); 
+                      } 
+                      setActiveModal(null); 
                     }}
                   >
                     <View style={[styles.sheetIconBox, {backgroundColor: styleData.bg}]}>
@@ -689,7 +701,6 @@ const styles = StyleSheet.create({
   stationSubText: { fontSize: 12, color: '#9E9E9E' },
   lineBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
   lineBadgeText: { fontSize: 10, fontWeight: 'bold' },
-
   alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 30 },
   alertBox: { width: '100%', backgroundColor: '#FFF', borderRadius: 30, padding: 25, alignItems: 'center', elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.3, shadowRadius: 10 },
   alertIconBg: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#FFF9C4', justifyContent: 'center', alignItems: 'center', marginBottom: 20, borderWidth: 5, borderColor: '#FFF', marginTop: -60, elevation: 5 },
