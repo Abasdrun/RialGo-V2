@@ -1,389 +1,531 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, FlatList, Modal, Animated, PanResponder, Dimensions, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Modal, Dimensions, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps'; 
+import * as Location from 'expo-location'; 
 import { supabase } from '../supabase';
 
-// 🌍 นำเข้าไลบรารีแผนที่และ GPS ของจริง!
-import MapView, { Marker, Polyline } from 'react-native-maps';
-import * as Location from 'expo-location';
+const { width, height } = Dimensions.get('window');
 
-const { width } = Dimensions.get('window');
+// โครงสร้างข้อมูลตั๋ว
+interface Ticket {
+  id: string;
+  refCode: string;
+  trainName: string;
+  origin: string;
+  dest: string;
+  depTime: string;
+  arrTime: string;
+  duration: string;
+  date: string;
+  seat: string;
+  cabin: string;
+  pax: number;
+  classType: string;
+  originCoords: { latitude: number, longitude: number }; // 📍 พิกัดต้นทาง
+  destCoords: { latitude: number, longitude: number };   // 📍 พิกัดปลายทาง
+}
 
 export default function LocationScreen() {
-  const [tickets, setTickets] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  
-  // States แผนที่และพิกัด
-  const [selectedTrip, setSelectedTrip] = useState<any>(null);
-  const [showAlarm, setShowAlarm] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState<{latitude: number, longitude: number} | null>(null);
-  const [distanceToDest, setDistanceToDest] = useState<number | null>(null); // ระยะทางที่เหลือ (km)
-  
-  // ตัวแปรเก็บฟังก์ชันติดตาม GPS เพื่อให้กดยกเลิกได้ตอนปิดแผนที่
-  const locationSubscription = useRef<Location.LocationSubscription | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [location, setLocation] = useState<any>(null);
+  const [userInitial, setUserInitial] = useState('อ'); // 🚀 เอากลับมาแล้ว!
+
+  const [activeMapTicket, setActiveMapTicket] = useState<Ticket | null>(null);
+  const [activeAlertTicket, setActiveAlertTicket] = useState<Ticket | null>(null);
 
   useEffect(() => {
-    fetchAllTrips();
-    return () => {
-      if (locationSubscription.current) locationSubscription.current.remove();
-    };
+    fetchActiveTickets();
+    requestLocationPermission();
   }, []);
 
-  // 📥 1. ดึงข้อมูลตั๋ว พร้อมพิกัด Latitude, Longitude จาก DB
-  const fetchAllTrips = async () => {
+  // ไม่ดัก Error ตามที่สั่ง ปล่อยแดงถ้าไม่เปิด GPS
+  const requestLocationPermission = async () => {
+    let { status } = await Location.requestForegroundPermissionsAsync();
+    if (status === 'granted') {
+      let currentLoc = await Location.getCurrentPositionAsync({});
+      setLocation(currentLoc.coords);
+    }
+  };
+
+  const parseCabinAndSeats = (seatsStr: string) => {
+    if (!seatsStr || seatsStr === 'undefined') return { cabin: '-', seats: '-', count: 1 };
+    const seatArr = seatsStr.split(',').map(s => s.trim());
+    const cabin = seatArr[0].split('-')[0] || '-';
+    const seats = seatArr.map(s => s.split('-')[1] || s).join(', ');
+    return { cabin, seats, count: seatArr.length };
+  };
+
+  const calculateRealDuration = (dep: string, arr: string) => {
+    if (!dep || !arr || dep === '00:00') return '--ชม. --น.';
+    const [dh, dm] = dep.split(':').map(Number);
+    const [ah, am] = arr.split(':').map(Number);
+    let mins = (ah * 60 + am) - (dh * 60 + dm);
+    if (mins < 0) mins += 24 * 60;
+    return `${Math.floor(mins / 60)}ชม. ${mins % 60}น.`;
+  };
+
+  const fetchActiveTickets = async () => {
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (user) {
-      const { data } = await supabase
-        .from('bookings')
-        .select(`
-          id, 
-          origin:origin_station_id(station_name, latitude, longitude), 
-          destination:destination_station_id(station_name, latitude, longitude), 
-          status
-        `)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (data) {
-        const formatted = data.map(b => ({
-          id: b.id,
-          origin: b.origin?.station_name || 'สถานีกลางกรุงเทพอภิวัฒน์',
-          originCoords: { lat: b.origin?.latitude || 13.8045, lon: b.origin?.longitude || 100.5398 },
-          destination: b.destination?.station_name || 'สถานีชุมพร',
-          destCoords: { lat: b.destination?.latitude || 10.4955, lon: b.destination?.longitude || 99.1821 },
-          depTime: '06:00', 
-          arrTime: '12:30', 
-        }));
-        setTickets(formatted);
-      }
-    }
-    setLoading(false);
-  };
-
-  // 🧮 ฟังก์ชันคำนวณระยะทาง (Haversine formula) หาระยะห่างเป็นกิโลเมตร
-  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371; 
-    const dLat = (lat2 - lat1) * (Math.PI / 180);
-    const dLon = (lon2 - lon1) * (Math.PI / 180);
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  };
-
-  // ⏱️ ✅ ใหม่! ฟังก์ชันแปลงระยะทาง (กม.) เป็นเวลาที่เหลือ (ชม. นาที)
-  const calculateTimeRemaining = (dist: number) => {
-    const avgSpeed = 60; // ความเร็วเฉลี่ยรถไฟ (กม./ชม.)
-    const totalHours = dist / avgSpeed;
-    const h = Math.floor(totalHours);
-    const m = Math.round((totalHours - h) * 60);
-
-    if (h > 0) return `อีก ${h} ชั่วโมง ${m} นาที`;
-    if (m > 0) return `อีก ${m} นาที`;
-    return 'กำลังจะถึงสถานี!';
-  };
-
-  // 🛰️ 2. ระบบขอสิทธิ์ GPS และติดตามพิกัด Real-time
-  const startTrackingLocation = async (trip: any) => {
-    setSelectedTrip(trip);
-    
     try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'ต้องอนุญาตให้เข้าถึง GPS ถึงจะดูแผนที่ได้นะพี่ยอน!');
-        return;
-      }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setUserInitial(user.user_metadata?.full_name?.charAt(0).toUpperCase() || 'อ');
 
-      let location = await Location.getCurrentPositionAsync({});
-      const currentCoords = { latitude: location.coords.latitude, longitude: location.coords.longitude };
-      setCurrentLocation(currentCoords);
+        const { data: bookings } = await supabase
+          .from('bookings')
+          .select(`
+            id, status, selected_seats, created_at, origin_station_id, destination_station_id,
+            trips ( train_id, departure_date, trains ( type, train_number ) ),
+            origin:origin_station_id ( station_name, latitude, longitude ), 
+            dest:destination_station_id ( station_name, latitude, longitude )
+          `)
+          .eq('user_id', user.id)
+          .eq('status', 'Confirmed') 
+          .order('created_at', { ascending: false });
 
-      locationSubscription.current = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 5000,
-          distanceInterval: 10,
-        },
-        (newLocation) => {
-          const coords = { latitude: newLocation.coords.latitude, longitude: newLocation.coords.longitude };
-          setCurrentLocation(coords);
+        if (bookings && bookings.length > 0) {
+          const formattedTickets = await Promise.all(bookings.map(async (b: any) => {
+            let exactDep = '18:30'; 
+            let exactArr = '01:00';
+            
+            if (b.trips?.train_id && b.origin_station_id && b.destination_station_id) {
+               const { data: stops } = await supabase.from('train_stops')
+                  .select('station_id, departure_time, arrival_time')
+                  .eq('train_id', b.trips.train_id)
+                  .in('station_id', [b.origin_station_id, b.destination_station_id]);
+               
+               if (stops) {
+                  const originStop = stops.find(s => s.station_id === b.origin_station_id);
+                  const destStop = stops.find(s => s.station_id === b.destination_station_id);
+                  if (originStop?.departure_time) exactDep = originStop.departure_time.substring(0, 5);
+                  if (destStop?.arrival_time) exactArr = destStop.arrival_time.substring(0, 5);
+               }
+            }
 
-          const dist = calculateDistance(coords.latitude, coords.longitude, trip.destCoords.lat, trip.destCoords.lon);
-          setDistanceToDest(dist);
+            const depDateStr = b.trips?.departure_date || new Date().toISOString().split('T')[0];
+            const depDateTime = new Date(`${depDateStr}T${exactDep}:00`);
+            const arrDateTime = new Date(depDateTime);
+            const [dh, dm] = exactDep.split(':').map(Number);
+            const [ah, am] = exactArr.split(':').map(Number);
+            let durationMins = (ah * 60 + am) - (dh * 60 + dm);
+            if (durationMins < 0) durationMins += 24 * 60; 
+            arrDateTime.setMinutes(arrDateTime.getMinutes() + durationMins);
 
-          if (dist < 20 && !showAlarm) {
-            setShowAlarm(true);
-          }
+            if (new Date() > arrDateTime) {
+              return null; 
+            }
+
+            const { cabin, seats, count } = parseCabinAndSeats(b.selected_seats);
+            const durationTxt = calculateRealDuration(exactDep, exactArr);
+
+            return {
+              id: b.id.toString(),
+              refCode: `TH ${new Date(b.created_at).getFullYear()}-${String(b.id).padStart(5, '0')}`,
+              trainName: `${b.trips?.trains?.type || 'ด่วนพิเศษ'} ${b.trips?.trains?.train_number || '7'}`,
+              origin: b.origin?.station_name || 'ดอนเมือง',
+              dest: b.dest?.station_name || 'รังสิต',
+              depTime: exactDep,
+              arrTime: exactArr,
+              duration: durationTxt,
+              date: b.trips?.departure_date,
+              seat: seats,
+              cabin: cabin,
+              pax: count,
+              classType: b.trips?.trains?.type === 'รถด่วนพิเศษ' ? 'ชั้น 2' : 'ชั้น 3',
+              // 🚀 ดึงพิกัดจากฐานข้อมูล (ถ้าไม่มีให้ Default เป็นแถวดอนเมือง/รังสิต)
+              originCoords: { 
+                latitude: parseFloat(b.origin?.latitude) || 13.9235, 
+                longitude: parseFloat(b.origin?.longitude) || 100.6042 
+              },
+              destCoords: { 
+                latitude: parseFloat(b.dest?.latitude) || 13.9858, 
+                longitude: parseFloat(b.dest?.longitude) || 100.6066 
+              }
+            };
+          }));
+
+          setTickets(formattedTickets.filter(t => t !== null) as Ticket[]);
+        } else {
+           setTickets([]);
         }
-      );
+      }
     } catch (error) {
-      Alert.alert('GPS Error 🛰️', 'หาตำแหน่งไม่เจอ! รบกวนพี่ยอนเปิด Location ใน Emulator ด้วยครับผม หรือลอง Set Location ในเมนู ... ดูนะ');
-      setCurrentLocation({ latitude: 13.7563, longitude: 100.5018 }); 
+      console.error(error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const closeMap = () => {
-    if (locationSubscription.current) locationSubscription.current.remove();
-    setSelectedTrip(null);
-    setCurrentLocation(null);
-    setDistanceToDest(null);
+  const handleTabPress = (tab: string) => {
+    if (tab === 'home') router.push('/');
+    if (tab === 'profile') router.push('/profile'); 
+    if (tab === 'notifications') router.push('/notifications');
   };
-
-  // 🎚️ 3. ระบบ Slider สำหรับหน้า Alarm
-  const pan = useRef(new Animated.ValueXY()).current;
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderMove: Animated.event([null, { dx: pan.x }], { useNativeDriver: false }),
-      onPanResponderRelease: (e, gesture) => {
-        if (gesture.dx > 150) {
-          setShowAlarm(false);
-          closeMap(); 
-          pan.setValue({ x: 0, y: 0 }); 
-        } else {
-          Animated.spring(pan, { toValue: { x: 0, y: 0 }, useNativeDriver: false }).start();
-        }
-      }
-    })
-  ).current;
-
-  const renderTripCard = ({ item }: { item: any }) => (
-    <View style={styles.tripCard}>
-      <View style={styles.routeHeader}>
-        <View style={styles.iconCircle}>
-          <Ionicons name="train" size={20} color="#5E35B1" />
-        </View>
-        <View style={{ flex: 1, marginLeft: 15 }}>
-          <Text style={styles.routeTitle}>{item.origin}</Text>
-          <Ionicons name="arrow-down" size={12} color="#9E9E9E" style={{ marginLeft: 5, marginVertical: 2 }} />
-          <Text style={styles.routeTitle}>{item.destination}</Text>
-        </View>
-      </View>
-      <TouchableOpacity 
-        style={styles.trackBtn}
-        onPress={() => startTrackingLocation(item)}
-      >
-        <Ionicons name="map-outline" size={20} color="#FFF" />
-        <Text style={styles.trackBtnText}>เข้าสู่แผนที่นำทาง</Text>
-      </TouchableOpacity>
-    </View>
-  );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <View style={styles.titleBox}>
-          <Ionicons name="location-outline" size={20} color="#333" />
-          <Text style={styles.titleText}>Location</Text>
-        </View>
-        <View style={{width: 40}} />
+    <View style={styles.container}>
+      
+      <View style={styles.blueHeaderBg}>
+        <View style={styles.headerGraphicCircle} />
       </View>
 
-      <Text style={styles.pageSubtitle}>รายการเที่ยวรถทั้งหมดของคุณ</Text>
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
+        
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}>
+            <Ionicons name="chevron-back" size={24} color="#FFF" />
+            <Text style={styles.headerTitle}>Location</Text>
+          </TouchableOpacity>
+          {/* 🚀 เอาปุ่มโปรไฟล์ตัวอักษรกลับมาให้แล้ว! */}
+          <TouchableOpacity style={styles.profileBtnCircle}>
+            <Text style={styles.profileBtnText}>{userInitial}</Text>
+          </TouchableOpacity>
+        </View>
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#5E35B1" style={{marginTop: 50}} />
-      ) : (
-        <FlatList
-          data={tickets}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContent}
-          renderItem={renderTripCard}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="map-outline" size={60} color="#E0E0E0" />
-              <Text style={styles.emptyText}>คุณยังไม่มีประวัติการจองเที่ยวรถเลย</Text>
-            </View>
-          }
-        />
-      )}
-
-      {/* ======================================= */}
-      {/* 🗺️ MODAL 1: หน้าแผนที่จริง */}
-      {/* ======================================= */}
-      <Modal visible={!!selectedTrip && !showAlarm} animationType="fade">
-        <View style={styles.mapContainer}>
-          
-          {currentLocation && selectedTrip && (
-            <MapView
-              style={StyleSheet.absoluteFillObject}
-              initialRegion={{
-                latitude: currentLocation.latitude,
-                longitude: currentLocation.longitude,
-                latitudeDelta: 2.0,
-                longitudeDelta: 2.0,
-              }}
-              showsUserLocation={true}
-            >
-              <Marker 
-                coordinate={{ latitude: selectedTrip.destCoords.lat, longitude: selectedTrip.destCoords.lon }}
-                title={selectedTrip.destination}
-                pinColor="#E91E63"
-              />
-              <Polyline 
-                coordinates={[
-                  currentLocation,
-                  { latitude: selectedTrip.destCoords.lat, longitude: selectedTrip.destCoords.lon }
-                ]}
-                strokeColor="#5E35B1"
-                strokeWidth={4}
-              />
-            </MapView>
-          )}
-          
-          <SafeAreaView style={{flex: 1, pointerEvents: 'box-none'}}>
-            <View style={styles.mapHeaderRow}>
-              <TouchableOpacity onPress={closeMap} style={styles.mapBackBtn}>
-                <Ionicons name="chevron-back" size={24} color="#333" />
-              </TouchableOpacity>
-              <View style={styles.mapTitleBox}>
-                <Ionicons name="location" size={16} color="#333" />
-                <Text style={styles.mapTitleText}>Live Tracking</Text>
-              </View>
-            </View>
-
-            <View style={styles.floatingCard}>
-              <View style={styles.trackingTimeline}>
-                <View style={styles.trackDotBlack} />
-                <View style={styles.trackLineHalfBlack} />
-                <Ionicons name="train" size={20} color="#E91E63" style={{marginHorizontal: -5}} />
-                <View style={styles.trackLineHalfGrey} />
-                <View style={styles.trackDotOutline} />
-              </View>
-              <View style={styles.trackStationLabels}>
-                <Text style={[styles.trackStationText, {textAlign: 'left'}]}>ตำแหน่งของคุณ</Text>
-                <Text style={[styles.trackStationText, {textAlign: 'right'}]}>{selectedTrip?.destination}</Text>
-              </View>
-
-              {/* ✅ แก้ไขตรงนี้แหละอาจารย์! โชว์เป็นเวลาที่คำนวณมาอย่างหล่อ */}
-              <TouchableOpacity onPress={() => setShowAlarm(true)} style={{alignItems: 'center'}}>
-                <Text style={styles.timeRemainText}>
-                  {distanceToDest ? calculateTimeRemaining(distanceToDest) : 'กำลังคำนวณ...'}
-                </Text>
-                {distanceToDest && (
-                  <Text style={{fontSize: 12, color: '#9E9E9E', marginTop: 2, marginBottom: 10}}>
-                    (ระยะทาง {distanceToDest.toFixed(1)} กม.)
-                  </Text>
-                )}
-              </TouchableOpacity>
-
-              <View style={styles.alarmInfoBox}>
-                <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                  <Ionicons name="alarm-outline" size={20} color="#333" />
-                  <View style={{marginLeft: 10}}>
-                    <Text style={styles.alarmBoxTitle}>ระบบปลุกอัตโนมัติทำงาน</Text>
-                    <Text style={styles.alarmBoxSub}>จะปลุกเมื่อเข้าใกล้ 20 กม. สุดท้าย</Text>
+        {loading ? (
+          <ActivityIndicator size="large" color="#5E35B1" style={{marginTop: 50}} />
+        ) : (
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {tickets.map((ticket, index) => (
+              <View key={index} style={styles.locationCard}>
+                
+                <View style={styles.routeRow}>
+                  <View style={{flex: 1}}>
+                    <Text style={styles.cityText}>{ticket.origin}</Text>
+                    <Text style={styles.timeText}>{ticket.depTime}</Text>
+                  </View>
+                  <View style={styles.arrowContainer}>
+                    <Text style={styles.durationText}>{ticket.duration}</Text>
+                    <Ionicons name="caret-forward" size={16} color="#BDBDBD" style={{marginTop: -8}} />
+                  </View>
+                  <View style={{flex: 1, alignItems: 'flex-end'}}>
+                    <Text style={styles.cityText}>{ticket.dest}</Text>
+                    <Text style={styles.timeText}>{ticket.arrTime}</Text>
                   </View>
                 </View>
-                <Ionicons name="radio-button-on" size={16} color="#4CAF50" />
+
+                <View style={styles.infoRow}>
+                  <View style={styles.infoItem}><Ionicons name="alarm-outline" size={12} color="#9E9E9E" /><Text style={styles.infoText}> {ticket.trainName}</Text></View>
+                  <View style={styles.infoItem}><MaterialCommunityIcons name="seat-passenger" size={12} color="#9E9E9E" /><Text style={styles.infoText}> {ticket.classType} · ที่นั่ง {ticket.seat} · ตู้ {ticket.cabin}</Text></View>
+                  <View style={styles.infoItem}><Ionicons name="body-outline" size={12} color="#9E9E9E" /><Text style={styles.infoText}> {ticket.pax} คน</Text></View>
+                </View>
+
+                <TouchableOpacity style={styles.mapBtn} onPress={() => setActiveMapTicket(ticket)}>
+                  <Ionicons name="map-outline" size={16} color="#262956" />
+                  <Text style={styles.mapBtnText}> แผนที่เดินทาง</Text>
+                </TouchableOpacity>
+
               </View>
-            </View>
-          </SafeAreaView>
+            ))}
+
+            {tickets.length === 0 && (
+              <View style={styles.emptyState}>
+                <Ionicons name="location-outline" size={50} color="#BDBDBD" />
+                <Text style={styles.emptyText}>ไม่มีการเดินทางในขณะนี้</Text>
+              </View>
+            )}
+          </ScrollView>
+        )}
+      </SafeAreaView>
+
+      <View style={styles.bottomTabBar}>
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabPress('home')}>
+          <Ionicons name="home-outline" size={24} color="#757575" />
+          <Text style={styles.tabItemText}>Home</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItemActive}>
+          <Ionicons name="location" size={26} color="#5E35B1" />
+          <Text style={styles.tabItemTextActive}>Location</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabPress('notifications')}>
+          <Ionicons name="notifications-outline" size={24} color="#757575" />
+          <Text style={styles.tabItemText}>Notifications</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabPress('profile')}>
+          <Ionicons name="person-outline" size={24} color="#757575" />
+          <Text style={styles.tabItemText}>My Profile</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ========================================================= */}
+      {/* 🗺️ MODAL: แผนที่เดินทาง (Map View) */}
+      {/* ========================================================= */}
+      <Modal visible={!!activeMapTicket} animationType="slide" transparent>
+        <View style={styles.modalFullBgWhite}>
+          
+          <View style={styles.mapHeaderBg}>
+             <SafeAreaView edges={['top']}>
+                <View style={styles.modalHeaderRow}>
+                  <TouchableOpacity onPress={() => setActiveMapTicket(null)} style={styles.backBtnCircle}>
+                    <Ionicons name="chevron-back" size={24} color="#FFF" />
+                  </TouchableOpacity>
+                  <Text style={styles.modalHeaderTitle}>Location</Text>
+                  <View style={{width: 40}} />
+                </View>
+
+                <View style={styles.stationProgressRow}>
+                  <View style={styles.progressDotSmall} />
+                  <View style={styles.progressLine} />
+                  <View style={styles.progressDotActive}>
+                     <View style={styles.progressDotInner} />
+                  </View>
+                  <View style={styles.progressLine} />
+                  <View style={styles.progressDotSmall} />
+                </View>
+                <View style={styles.stationNameRow}>
+                  <Text style={styles.stationNameLabel}>สถานีศาลายา</Text>
+                  <Text style={styles.stationNameLabel}>สถานีนครปฐม</Text>
+                  <Text style={styles.stationNameLabel}>สถานีบ้านโป่ง</Text>
+                </View>
+             </SafeAreaView>
+          </View>
+
+          <View style={styles.mapContainer}>
+            <MapView
+              provider={PROVIDER_GOOGLE}
+              style={styles.map}
+              initialRegion={{
+                latitude: activeMapTicket?.originCoords?.latitude || location?.latitude || 13.9235,
+                longitude: activeMapTicket?.originCoords?.longitude || location?.longitude || 100.6042,
+                latitudeDelta: 0.1, // ซูมใกล้ขึ้นหน่อยจะได้เห็นชัดๆ
+                longitudeDelta: 0.1,
+              }}
+              showsUserLocation={true}
+              customMapStyle={mapStyle} 
+            >
+              {/* 🚀 ลากเส้นตามพิกัดจริงที่ได้จาก Database! */}
+              {activeMapTicket && activeMapTicket.originCoords && activeMapTicket.destCoords && (
+                <Polyline 
+                  coordinates={[ activeMapTicket.originCoords, activeMapTicket.destCoords ]} 
+                  strokeColor="#5E35B1" strokeWidth={4} 
+                />
+              )}
+            </MapView>
+          </View>
+
+          <View style={styles.mapBottomCard}>
+             <View style={styles.mapRouteInfoRow}>
+                <View style={styles.mapInfoBox}>
+                   <Text style={styles.mapLabelSub}>สถานีต้นทาง</Text>
+                   <Text style={styles.mapLabelMain}>{activeMapTicket?.origin}</Text>
+                   <Text style={styles.mapLabelSub}>{activeMapTicket?.depTime}</Text>
+                </View>
+                <Ionicons name="arrow-forward" size={20} color="#757575" />
+                <View style={styles.mapInfoBox}>
+                   <Text style={styles.mapLabelSub}>สถานีปลายทาง</Text>
+                   <Text style={styles.mapLabelMain}>{activeMapTicket?.dest}</Text>
+                   <Text style={styles.mapLabelSub}>{activeMapTicket?.arrTime}</Text>
+                </View>
+             </View>
+
+             <View style={styles.mapStatsRow}>
+                <View style={styles.mapStatItem}>
+                   <Text style={styles.mapLabelSub}>สถานีถัดไป</Text>
+                   <Text style={styles.mapStatValue}>สถานีบ้านโป่ง</Text>
+                </View>
+                <View style={styles.mapStatItem}>
+                   <Text style={styles.mapLabelSub}>ระยะทาง</Text>
+                   <Text style={styles.mapStatValue}>320 km</Text>
+                </View>
+                <View style={styles.mapStatItem}>
+                   <Text style={styles.mapLabelSub}>คงเหลือ</Text>
+                   <Text style={styles.mapStatValue}>3:22 ชั่วโมง</Text>
+                </View>
+             </View>
+             
+             <TouchableOpacity style={{position: 'absolute', top: 10, right: 10, padding: 10}} onPress={() => {
+                setActiveAlertTicket(activeMapTicket);
+                setActiveMapTicket(null);
+             }}>
+                 <Ionicons name="notifications-circle" size={30} color="#FFF" />
+             </TouchableOpacity>
+          </View>
         </View>
       </Modal>
 
-      {/* ======================================= */}
-      {/* ⏰ MODAL 2: หน้าแจ้งเตือนก่อนลงรถ */}
-      {/* ======================================= */}
-      <Modal visible={showAlarm} animationType="slide">
-        <SafeAreaView style={styles.alarmContainer}>
-          <View style={styles.alarmHeaderRow}>
-            <TouchableOpacity onPress={() => {setShowAlarm(false); closeMap();}} style={styles.alarmBackBtn}>
-              <Ionicons name="chevron-back" size={24} color="#333" />
-            </TouchableOpacity>
-            <View style={styles.alarmTitleBox}>
-              <Ionicons name="location" size={16} color="#333" />
-              <Text style={styles.alarmTitleText}>Arrival Alert</Text>
-            </View>
+      {/* ========================================================= */}
+      {/* ⏰ MODAL: แจ้งเตือนก่อนถึงสถานี (Alert View) */}
+      {/* ========================================================= */}
+      <Modal visible={!!activeAlertTicket} animationType="slide" transparent>
+        <View style={styles.modalFullBgWhite}>
+          
+          <View style={styles.mapHeaderBg}>
+             <SafeAreaView edges={['top']}>
+                <View style={styles.modalHeaderRow}>
+                  <TouchableOpacity onPress={() => setActiveAlertTicket(null)} style={styles.backBtnCircle}>
+                    <Ionicons name="chevron-back" size={24} color="#FFF" />
+                  </TouchableOpacity>
+                  <Text style={styles.modalHeaderTitle}>แจ้งเตือนสถานี</Text>
+                  <View style={{width: 40}} />
+                </View>
+
+                <View style={styles.stationProgressRow}>
+                  <View style={styles.progressDotSmall} />
+                  <View style={styles.progressLine} />
+                  <View style={styles.progressDotActive}>
+                     <View style={styles.progressDotInner} />
+                  </View>
+                  <View style={styles.progressLine} />
+                  <View style={styles.progressDotSmall} />
+                </View>
+                <View style={styles.stationNameRow}>
+                  <Text style={styles.stationNameLabel}>สถานีศาลายา</Text>
+                  <Text style={styles.stationNameLabel}>สถานีนครปฐม</Text>
+                  <Text style={styles.stationNameLabel}>สถานีบ้านโป่ง</Text>
+                </View>
+             </SafeAreaView>
           </View>
 
-          <View style={styles.warningTextContainer}>
-            <Text style={styles.warningRedHuge}>ใกล้ถึงแล้ว!</Text>
-            <Text style={styles.warningRedNormal}>เตรียมตัวลงที่สถานี {selectedTrip?.destination}</Text>
+          <View style={styles.alertCardContainer}>
+             <View style={styles.alertDarkCard}>
+                
+                <View style={styles.alertIconWrapper}>
+                   <Ionicons name="alarm-outline" size={80} color="#FFF" />
+                </View>
+                <Text style={styles.alertHugeTime}>20</Text>
+                <Text style={styles.alertMinText}>นาที</Text>
+
+                <View style={styles.alertWarningBox}>
+                   <Text style={styles.alertWarningTitle}>อีก 20 นาที จะถึงสถานีปลายทาง</Text>
+                   <Text style={styles.alertWarningSub}>กรุณาเตรียมสัมภาระและบัตรโดยสาร</Text>
+                </View>
+
+                <View style={styles.alertNextStationBox}>
+                   <View style={styles.alertNextIcon}><Ionicons name="train" size={24} color="#5E35B1" /></View>
+                   <View style={{flex: 1}}>
+                      <Text style={styles.alertLabelGrey}>สถานีถัดไป (ปลายทาง)</Text>
+                      <Text style={styles.alertStationBig}>{activeAlertTicket?.dest}</Text>
+                      <Text style={styles.alertLabelGrey}>{activeAlertTicket?.arrTime}</Text>
+                   </View>
+                   <View style={{alignItems: 'flex-end'}}>
+                      <Text style={styles.alertYellowText}>อีก 20 นาที</Text>
+                      <Text style={styles.alertLabelGrey}>ชานชาลา 2</Text>
+                   </View>
+                </View>
+
+                <View style={styles.alertActionRow}>
+                   <View style={styles.alertSeatBox}>
+                      <Text style={styles.alertGreenText}>ที่นั่งของคุณ</Text>
+                      <Text style={styles.alertSeatTextMain}>ที่นั่ง {activeAlertTicket?.seat} · ตู้ {activeAlertTicket?.cabin} · {activeAlertTicket?.classType}</Text>
+                      <View style={styles.alertSeatBadge}><Text style={styles.alertSeatBadgeText}>{activeAlertTicket?.seat}</Text></View>
+                   </View>
+
+                   <TouchableOpacity style={styles.alertMapBtn} onPress={() => {
+                      setActiveMapTicket(activeAlertTicket);
+                      setActiveAlertTicket(null);
+                   }}>
+                      <Ionicons name="map-outline" size={20} color="#FFF" style={{marginRight: 5}} />
+                      <Text style={styles.alertMapBtnText}>ดูแผนที่</Text>
+                   </TouchableOpacity>
+                </View>
+
+             </View>
           </View>
 
-          <View style={styles.bigAlarmCircle}>
-            <Ionicons name="alarm" size={120} color="#FFF" />
-          </View>
-
-          <View style={styles.sliderTrack}>
-            <Animated.View
-              style={[styles.sliderThumb, { transform: [{ translateX: pan.x }] }]}
-              {...panResponder.panHandlers}
-            >
-              <Ionicons name="caret-forward" size={24} color="#333" />
-            </Animated.View>
-            <Text style={styles.sliderText}>เลื่อนเพื่อปิดการแจ้งเตือน</Text>
-          </View>
-
-        </SafeAreaView>
+        </View>
       </Modal>
 
-    </SafeAreaView>
+    </View>
   );
 }
 
+const mapStyle = [];
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFAFA' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
-  titleBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 25, height: 45, marginHorizontal: 15, paddingHorizontal: 15, elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
-  titleText: { marginLeft: 10, fontSize: 16, fontWeight: 'bold', color: '#333' },
-  pageSubtitle: { marginHorizontal: 25, fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 15 },
-  listContent: { paddingHorizontal: 20, paddingBottom: 50 },
+  container: { flex: 1, backgroundColor: '#F9F9F9' },
+  safeArea: { flex: 1, zIndex: 10 },
   
-  tripCard: { backgroundColor: '#FFF', borderRadius: 20, padding: 20, marginBottom: 15, elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
-  routeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  iconCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F3F2FF', justifyContent: 'center', alignItems: 'center' },
-  routeTitle: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  trackBtn: { backgroundColor: '#5E35B1', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 12, borderRadius: 15 },
-  trackBtnText: { color: '#FFF', fontWeight: 'bold', marginLeft: 10, fontSize: 16 },
-  emptyContainer: { alignItems: 'center', marginTop: 80 },
+  blueHeaderBg: { position: 'absolute', top: 0, left: 0, right: 0, height: 220, backgroundColor: '#2E3165', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, zIndex: 0 },
+  headerGraphicCircle: { position: 'absolute', right: -50, top: -50, width: 300, height: 300, borderRadius: 150, backgroundColor: 'rgba(255,255,255,0.05)' },
+  
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10 },
+  backBtnCircle: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', paddingRight: 15, borderRadius: 20 },
+  headerTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 5 },
+  profileBtnCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFF' },
+  profileBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+
+  scrollContent: { padding: 20, paddingTop: 30, paddingBottom: 120 },
+  
+  locationCard: { backgroundColor: '#FFFDFD', borderRadius: 25, marginBottom: 20, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, padding: 20, paddingBottom: 0 },
+  
+  routeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  cityText: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+  timeText: { fontSize: 11, color: '#9E9E9E', marginTop: 2 },
+  arrowContainer: { alignItems: 'center', flex: 1, borderBottomWidth: 1, borderBottomColor: '#E0E0E0', marginHorizontal: 15, paddingBottom: 5 },
+  durationText: { fontSize: 10, color: '#BDBDBD', marginBottom: 2 },
+
+  infoRow: { flexDirection: 'row', alignItems: 'center', paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  infoItem: { flexDirection: 'row', alignItems: 'center', marginRight: 12 },
+  infoText: { fontSize: 11, color: '#757575' },
+
+  mapBtn: { backgroundColor: '#EBE4FF', alignSelf: 'flex-end', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, flexDirection: 'row', alignItems: 'center', marginTop: -15, marginBottom: 15, marginRight: -5 },
+  mapBtnText: { color: '#5E35B1', fontSize: 12, fontWeight: 'bold' },
+
+  emptyState: { alignItems: 'center', marginTop: 80 },
   emptyText: { color: '#9E9E9E', marginTop: 15, fontSize: 16 },
 
-  mapContainer: { flex: 1, backgroundColor: '#E0E0E0' },
-  mapHeaderRow: { flexDirection: 'row', padding: 20, alignItems: 'center', position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
-  mapBackBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', elevation: 5 },
-  mapTitleBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 25, height: 45, marginLeft: 15, paddingHorizontal: 15, elevation: 5 },
-  mapTitleText: { marginLeft: 10, fontSize: 14, fontWeight: 'bold', color: '#333' },
+  bottomTabBar: { position: 'absolute', bottom: 20, left: 20, right: 20, height: 70, backgroundColor: '#FFF', borderRadius: 35, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 15 },
+  tabItem: { alignItems: 'center', justifyContent: 'center', flex: 1 },
+  tabItemActive: { alignItems: 'center', justifyContent: 'center', flex: 1 },
+  tabItemText: { fontSize: 10, color: '#757575', marginTop: 4, fontWeight: '500' },
+  tabItemTextActive: { fontSize: 10, color: '#5E35B1', marginTop: 4, fontWeight: 'bold' },
 
-  floatingCard: { position: 'absolute', bottom: 30, left: 20, right: 20, backgroundColor: '#FFF', borderRadius: 25, padding: 20, elevation: 10 },
-  trackingTimeline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
-  trackDotBlack: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#333' },
-  trackLineHalfBlack: { flex: 1, height: 2, backgroundColor: '#333' },
-  trackLineHalfGrey: { flex: 1, height: 2, backgroundColor: '#E0E0E0' },
-  trackDotOutline: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: '#333', backgroundColor: '#FFF' },
-  trackStationLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, marginBottom: 20 },
-  trackStationText: { fontSize: 12, color: '#757575', fontWeight: 'bold' },
+  modalFullBgWhite: { flex: 1, backgroundColor: '#F9F9F9' }, 
+  mapHeaderBg: { backgroundColor: '#2E3165', borderBottomLeftRadius: 30, borderBottomRightRadius: 30, paddingBottom: 20 },
   
-  // ปรับตัวหนังสือสีเขียวให้เด่นขึ้น
-  timeRemainText: { fontSize: 24, fontWeight: 'bold', color: '#4CAF50', textAlign: 'center' },
-  delayText: { fontSize: 12, color: '#9E9E9E', marginTop: 5, marginBottom: 15, textAlign: 'center' },
+  modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 },
+  modalHeaderTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 
-  alarmInfoBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 15, padding: 15 },
-  alarmBoxTitle: { fontSize: 14, fontWeight: 'bold', color: '#333' },
-  alarmBoxSub: { fontSize: 10, color: '#9E9E9E', marginTop: 2 },
+  stationProgressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, marginBottom: 10 },
+  progressDotSmall: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#EBE4FF' },
+  progressDotActive: { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.3)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#FFF' },
+  progressDotInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#FFF' },
+  progressLine: { flex: 1, height: 2, backgroundColor: '#FFF', marginHorizontal: -2 },
+  stationNameRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 30 },
+  stationNameLabel: { color: '#D1C4E9', fontSize: 10 },
 
-  alarmContainer: { flex: 1, backgroundColor: '#0B0C1A' },
-  alarmHeaderRow: { flexDirection: 'row', padding: 20, alignItems: 'center' },
-  alarmBackBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center' },
-  alarmTitleBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 25, height: 45, marginLeft: 15, paddingHorizontal: 15 },
-  alarmTitleText: { marginLeft: 10, fontSize: 14, fontWeight: 'bold', color: '#333' },
+  mapContainer: { flex: 1 },
+  map: { ...StyleSheet.absoluteFillObject },
+  customMarker: { width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(244, 67, 54, 0.3)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#F44336' },
+  markerCore: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#F44336' },
 
-  warningTextContainer: { alignItems: 'center', marginTop: 80 },
-  warningRedHuge: { color: '#E91E63', fontSize: 36, fontWeight: 'bold' },
-  warningRedNormal: { color: '#FFF', fontSize: 18, marginTop: 10 },
-  bigAlarmCircle: { alignSelf: 'center', marginTop: 80, width: 200, height: 200, borderRadius: 100, backgroundColor: '#E91E63', justifyContent: 'center', alignItems: 'center', elevation: 20, shadowColor: '#E91E63', shadowOpacity: 0.5, shadowRadius: 20 },
+  mapBottomCard: { backgroundColor: '#1E2046', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25, marginTop: -20 },
+  mapRouteInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#3A3C59', paddingBottom: 20, marginBottom: 20 },
+  mapInfoBox: { flex: 1, alignItems: 'center', paddingVertical: 10, borderWidth: 1, borderColor: '#3A3C59', borderRadius: 15 },
+  mapLabelSub: { color: '#A8AACC', fontSize: 10, marginBottom: 2 },
+  mapLabelMain: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  
+  mapStatsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  mapStatItem: { flex: 1, borderWidth: 1, borderColor: '#3A3C59', borderRadius: 15, paddingVertical: 10, paddingHorizontal: 10, marginRight: 5, alignItems: 'center' },
+  mapStatValue: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginTop: 2 },
 
-  sliderTrack: { position: 'absolute', bottom: 50, alignSelf: 'center', width: width - 60, height: 60, backgroundColor: '#FFF', borderRadius: 30, justifyContent: 'center', paddingHorizontal: 5 },
-  sliderThumb: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', zIndex: 1, elevation: 5, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 3 },
-  sliderText: { position: 'absolute', width: '100%', textAlign: 'center', color: '#757575', fontSize: 14, fontWeight: 'bold', zIndex: 0 },
+  alertCardContainer: { flex: 1, padding: 20, marginTop: 10 },
+  alertDarkCard: { backgroundColor: '#1E2046', borderRadius: 30, padding: 25, flex: 1, alignItems: 'center', elevation: 5 },
+  alertIconWrapper: { marginTop: 10, marginBottom: 10 },
+  alertHugeTime: { fontSize: 70, fontWeight: 'bold', color: '#FFF', lineHeight: 80 },
+  alertMinText: { fontSize: 18, color: '#FFF', marginBottom: 20 },
+
+  alertWarningBox: { width: '100%', borderWidth: 1, borderColor: '#3A3C59', borderRadius: 20, padding: 15, alignItems: 'center', marginBottom: 20 },
+  alertWarningTitle: { color: '#F44336', fontSize: 14, fontWeight: 'bold', marginBottom: 5 },
+  alertWarningSub: { color: '#A8AACC', fontSize: 10 },
+
+  alertNextStationBox: { width: '100%', flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#3A3C59', borderRadius: 20, padding: 15, marginBottom: 20 },
+  alertNextIcon: { width: 45, height: 45, borderRadius: 12, backgroundColor: 'rgba(94,53,177,0.2)', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+  alertLabelGrey: { color: '#A8AACC', fontSize: 10 },
+  alertStationBig: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginVertical: 2 },
+  alertYellowText: { color: '#FBC02D', fontSize: 11, fontWeight: 'bold', marginBottom: 2 },
+
+  alertActionRow: { width: '100%', flexDirection: 'row', justifyContent: 'space-between' },
+  alertSeatBox: { flex: 1, borderWidth: 1, borderColor: '#3A3C59', borderRadius: 20, padding: 15, marginRight: 10 },
+  alertGreenText: { color: '#4CAF50', fontSize: 11, fontWeight: 'bold', marginBottom: 5 },
+  alertSeatTextMain: { color: '#FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 10 },
+  alertSeatBadge: { backgroundColor: '#5E35B1', alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10 },
+  alertSeatBadgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+
+  alertMapBtn: { flex: 0.8, backgroundColor: '#3A3C59', borderRadius: 20, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', borderWidth: 1, borderColor: '#5E35B1' },
+  alertMapBtnText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
 });
