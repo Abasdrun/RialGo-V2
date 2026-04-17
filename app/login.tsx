@@ -24,7 +24,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false); // เปลี่ยนกลับเป็นจดจำรหัสผ่าน
+  const [rememberMe, setRememberMe] = useState(false);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMsg, setModalMsg] = useState('');
@@ -39,8 +39,11 @@ export default function LoginScreen() {
       if (error) {
         setLoading(false); 
         let errorMessage = error.message;
+        // แปลข้อความ Error พื้นฐาน
         if (errorMessage.includes('Invalid login credentials')) {
           errorMessage = 'อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง';
+        } else if (errorMessage.includes('Email not confirmed')) {
+          errorMessage = 'กรุณายืนยันอีเมลของคุณก่อนเข้าสู่ระบบ';
         }
         setModalMsg(errorMessage);
         setModalVisible(true);
@@ -61,13 +64,12 @@ export default function LoginScreen() {
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false} bounces={false}>
         
-        {/* ส่วนหัวสีน้ำเงิน */}
+        {/* ส่วนหัวสีน้ำเงิน พร้อมกราฟิกวงกลม */}
         <View style={styles.topBackground}>
           <View style={styles.graphicCircle1} />
           <View style={styles.graphicCircle2} />
           <SafeAreaView edges={['top']}>
             <View style={styles.logoContainer}>
-              {/* 1. แก้โลโก้กลับเป็นแบบเดิม */}
               <MaterialCommunityIcons name="train" size={70} color="#FFF" />
               <Text style={styles.logoText}>RailGo</Text>
             </View>
@@ -87,7 +89,7 @@ export default function LoginScreen() {
               <MaterialIcons name="mail-outline" size={22} color="#555" style={styles.inputIcon} />
               <TextInput 
                 style={styles.input} 
-                placeholder="abasdrun.mae@spumail.net" 
+                placeholder="กรุณากรอกอีเมลของคุณ" 
                 placeholderTextColor="#BDBDBD" 
                 keyboardType="email-address" 
                 autoCapitalize="none" 
@@ -103,7 +105,7 @@ export default function LoginScreen() {
               <MaterialCommunityIcons name="key-variant" size={22} color="#555" style={styles.inputIcon} />
               <TextInput 
                 style={styles.input} 
-                placeholder="••••••••" 
+                placeholder="กรุณากรอกรหัสผ่าน" 
                 placeholderTextColor="#BDBDBD" 
                 secureTextEntry={!showPassword} 
                 value={password} 
@@ -115,7 +117,6 @@ export default function LoginScreen() {
             </View>
           </View>
 
-          {/* 2. ย้ายลืมรหัสผ่านขึ้นมาใกล้ช่องกรอก และ 3. เปลี่ยนเป็นจดจำรหัสผ่าน */}
           <View style={styles.optionsRow}>
             <TouchableOpacity style={styles.checkboxRow} onPress={() => setRememberMe(!rememberMe)}>
               <View style={[styles.checkbox, rememberMe && styles.checkboxActive]}>
@@ -130,32 +131,33 @@ export default function LoginScreen() {
           </View>
 
           <TouchableOpacity 
-            style={[styles.primaryBtn, (!isFormValid || loading) && {opacity: 0.7}]} 
+            style={[styles.primaryBtn, (!isFormValid || loading) && {opacity: 0.8}]} 
             onPress={handleLogin} 
             disabled={!isFormValid || loading}
           >
             {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>เข้าสู่ระบบ</Text>}
           </TouchableOpacity>
 
+          {/* 🚀 แก้ไขจุดนี้: เปลี่ยนจาก OR เป็น หรือ */}
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
+            <Text style={styles.dividerText}>หรือ</Text>
             <View style={styles.dividerLine} />
           </View>
 
           <View style={styles.socialRow}>
             <TouchableOpacity style={styles.socialBtn}>
-              <Ionicons name="logo-google" size={24} color="#DB4437" style={{marginRight: 8}} />
+              <Ionicons name="logo-google" size={22} color="#DB4437" style={{marginRight: 8}} />
               <Text style={styles.socialBtnText}>Google</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.socialBtn}>
-              <Ionicons name="logo-facebook" size={24} color="#1877F2" style={{marginRight: 8}} />
+              <Ionicons name="logo-facebook" size={22} color="#1877F2" style={{marginRight: 8}} />
               <Text style={styles.socialBtnText}>Facebook</Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.footerRow}>
-            <Text style={styles.footerText}>ยังไม่มีบัญชี? </Text>
+            <Text style={styles.footerText}>ยังไม่มีบัญชีผู้ใช้? </Text>
             <TouchableOpacity onPress={() => router.push('/signup')}>
               <Text style={styles.footerLink}>สมัครสมาชิก</Text>
             </TouchableOpacity>
@@ -163,15 +165,17 @@ export default function LoginScreen() {
         </View>
       </ScrollView>
 
-      {/* Modal Popup แจ้งเตือน */}
+      {/* Modal Popup แจ้งเตือนภาษาไทย */}
       <Modal animationType="fade" transparent={true} visible={modalVisible}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <View style={styles.errorIconCircle}><Ionicons name="alert-circle" size={44} color="#FF5252" /></View>
-            <Text style={styles.modalTitle}>เข้าสู่ระบบล้มเหลว</Text>
+            <View style={styles.errorIconCircle}>
+              <Ionicons name="alert-circle" size={44} color="#FF5252" />
+            </View>
+            <Text style={styles.modalTitle}>เข้าสู่ระบบไม่สำเร็จ</Text>
             <Text style={styles.modalMessage}>{modalMsg}</Text>
             <TouchableOpacity style={styles.modalButton} onPress={() => setModalVisible(false)}>
-              <Text style={styles.modalButtonText}>ลองอีกครั้ง</Text>
+              <Text style={styles.modalButtonText}>ลองใหม่อีกครั้ง</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -183,51 +187,52 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF' },
   scrollContainer: { flexGrow: 1 },
-  topBackground: { height: height * 0.35, backgroundColor: '#2E2D77', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  graphicCircle1: { position: 'absolute', top: -20, right: -40, width: 250, height: 250, borderRadius: 125, backgroundColor: 'rgba(255,255,255,0.05)' },
-  graphicCircle2: { position: 'absolute', bottom: 40, left: -60, width: 300, height: 300, borderRadius: 150, backgroundColor: 'rgba(255,255,255,0.03)' },
+  // แก้ไขส่วนหัวให้นิ่งและแสดงวงกลมครบ
+  topBackground: { height: height * 0.32, backgroundColor: '#2E2D77', alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  graphicCircle1: { position: 'absolute', top: -30, right: -40, width: 230, height: 230, borderRadius: 115, backgroundColor: 'rgba(255,255,255,0.06)' },
+  graphicCircle2: { position: 'absolute', bottom: -50, left: -60, width: 280, height: 280, borderRadius: 140, backgroundColor: 'rgba(255,255,255,0.04)' },
   logoContainer: { alignItems: 'center' },
   logoText: { color: '#FFF', fontSize: 32, fontWeight: 'bold', marginTop: 5 },
   
   bottomCard: { flex: 1, backgroundColor: '#FFF', borderTopLeftRadius: 40, borderTopRightRadius: 40, paddingHorizontal: 25, paddingVertical: 30, marginTop: -40 },
   headerTextGroup: { marginBottom: 25, borderBottomWidth: 1, borderBottomColor: '#F0F0F0', paddingBottom: 15 },
-  pageTitle: { fontSize: 24, fontWeight: 'bold', color: '#444' },
-  subTitle: { fontSize: 14, color: '#5D5BBF', marginTop: 4 },
+  pageTitle: { fontSize: 24, fontWeight: 'bold', color: '#333' },
+  subTitle: { fontSize: 14, color: '#5D5BBF', marginTop: 4, fontWeight: '600' },
   
   inputGroup: { marginBottom: 15 },
-  label: { fontSize: 14, fontWeight: '600', color: '#444', marginBottom: 8 },
-  inputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#DDD', borderRadius: 12, paddingHorizontal: 15, height: 55 },
+  label: { fontSize: 14, fontWeight: 'bold', color: '#444', marginBottom: 8, marginLeft: 5 },
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#DDD', borderRadius: 12, paddingHorizontal: 15, height: 55, backgroundColor: '#FAFAFA' },
   inputIcon: { marginRight: 10 },
   input: { flex: 1, fontSize: 15, color: '#333' },
   eyeIcon: { padding: 5 },
   
-  optionsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30, marginTop: 5 },
+  optionsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 25, marginTop: 5 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center' },
   checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: '#5D5BBF', justifyContent: 'center', alignItems: 'center', marginRight: 8 },
   checkboxActive: { backgroundColor: '#5D5BBF' },
-  rememberText: { fontSize: 12, color: '#666' },
-  forgotText: { fontSize: 12, color: '#5D5BBF', fontWeight: 'bold' },
+  rememberText: { fontSize: 13, color: '#666' },
+  forgotText: { fontSize: 13, color: '#5D5BBF', fontWeight: 'bold' },
   
-  primaryBtn: { backgroundColor: '#5D5BBF', height: 55, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 25 },
+  primaryBtn: { backgroundColor: '#2E2D77', height: 55, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 25 },
   primaryBtnText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   
   dividerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 25 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#333' },
-  dividerText: { marginHorizontal: 15, color: '#333', fontSize: 14, fontWeight: 'bold' },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#EEE' },
+  dividerText: { marginHorizontal: 15, color: '#999', fontSize: 14, fontWeight: 'bold' },
   
   socialRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30 },
-  socialBtn: { flex: 0.48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 55, borderRadius: 30, backgroundColor: '#FFF', elevation: 2, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: {width:0, height:2} },
-  socialBtnText: { fontSize: 15, fontWeight: 'bold', color: '#333' },
+  socialBtn: { flex: 0.48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: 26, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#EEE', elevation: 1 },
+  socialBtnText: { fontSize: 15, fontWeight: 'bold', color: '#444' },
   
   footerRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 20 },
-  footerText: { fontSize: 14, color: '#333' },
+  footerText: { fontSize: 14, color: '#666' },
   footerLink: { fontSize: 14, color: '#5D5BBF', fontWeight: 'bold', textDecorationLine: 'underline' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: width * 0.85, backgroundColor: '#FFF', borderRadius: 30, padding: 25, alignItems: 'center' },
+  modalContent: { width: width * 0.85, backgroundColor: '#FFF', borderRadius: 25, padding: 30, alignItems: 'center', elevation: 10 },
   errorIconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#FFEBEE', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#262956', marginBottom: 10 },
-  modalMessage: { fontSize: 15, color: '#616161', textAlign: 'center', marginBottom: 30 },
-  modalButton: { backgroundColor: '#262956', width: '100%', paddingVertical: 15, borderRadius: 15, alignItems: 'center' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', marginBottom: 10 },
+  modalMessage: { fontSize: 15, color: '#666', textAlign: 'center', marginBottom: 30, lineHeight: 22 },
+  modalButton: { backgroundColor: '#2E2D77', width: '100%', paddingVertical: 15, borderRadius: 15, alignItems: 'center' },
   modalButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 });
