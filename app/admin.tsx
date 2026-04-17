@@ -10,7 +10,6 @@ const { width } = Dimensions.get('window');
 export default function AdminDashboardScreen() {
   const [loading, setLoading] = useState(true);
   
-  // 📌 States สำหรับเก็บข้อมูลจริง
   const [stats, setStats] = useState({ totalTrips: 0, revenue: 0, salesPercent: 0, totalUsers: 0 });
   const [activities, setActivities] = useState<any[]>([]);
   const [recentTrips, setRecentTrips] = useState<any[]>([]);
@@ -22,10 +21,9 @@ export default function AdminDashboardScreen() {
     }, [])
   );
 
-  // 🕒 ฟังก์ชันคำนวณเวลา (เช่น 5 นาทีที่แล้ว)
   const timeAgo = (dateStr: string) => {
     const seconds = Math.floor((new Date().getTime() - new Date(dateStr).getTime()) / 1000);
-    if (seconds < 60) return `${seconds} วินาทีที่แล้ว`;
+    if (seconds < 60) return `เมื่อสักครู่`;
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes} นาทีที่แล้ว`;
     const hours = Math.floor(minutes / 60);
@@ -33,7 +31,6 @@ export default function AdminDashboardScreen() {
     return `${Math.floor(hours / 24)} วันที่แล้ว`;
   };
 
-  // 📅 ฟังก์ชันแปลงวันที่เป็นภาษาไทย (เช่น 27 มี.ค. 2026)
   const formatThaiDate = (dateStr: string) => {
     if (!dateStr) return '';
     const months = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
@@ -65,37 +62,70 @@ export default function AdminDashboardScreen() {
       });
 
       // ==========================================
-      // 🚄 2. ดึงรอบเที่ยว "ที่ถูกเพิ่มเข้ามาล่าสุด" 3 รายการ
+      // 🚄 2. ดึงรอบเที่ยวล่าสุดที่แอดมินเพิ่งสร้าง 
+      // 🚀 (FIXED: แก้ให้ดึงสถานีผ่าน train_stops แทน เพื่อป้องกันโค้ดพัง)
       // ==========================================
-      const { data: tripsData } = await supabase
+      const { data: tripsData, error: tripsError } = await supabase
         .from('trips')
         .select(`
-          id, departure_date, available_seats, status, created_at,
-          trains ( type, train_number, departure_time, arrival_time, origin:origin_station_id(station_name), dest:destination_station_id(station_name) )
+          id, departure_date, available_seats, status, created_at, train_id,
+          trains ( type, train_number )
         `)
-        // 🚀 โค้ดตรงนี้แหละที่เรียงตามเวลาที่แอดมินกดสร้างรอบรถ (เพิ่งเพิ่มสดๆร้อนๆ จะอยู่บนสุด)
         .order('created_at', { ascending: false }) 
         .limit(3);
 
-      if (tripsData) {
-        const formattedTrips = tripsData.map(t => ({
-          id: t.id.toString(),
-          route: `${t.trains?.origin?.station_name || '?'} ➔ ${t.trains?.dest?.station_name || '?'}`,
-          date: formatThaiDate(t.departure_date), // แปลงเป็นวันที่แบบไทย
-          time: `${t.trains?.departure_time?.substring(0,5)} - ${t.trains?.arrival_time?.substring(0,5)}`,
-          seat: `${t.available_seats}/40`, 
-          status: t.status === 'Scheduled' ? 'เปิดจอง' : t.status === 'Completed' ? 'เดินทางแล้ว' : 'เต็มแล้ว',
-          statusColor: t.status === 'Scheduled' ? '#E8F5E9' : '#FFEBEE',
-          textColor: t.status === 'Scheduled' ? '#4CAF50' : '#F44336'
-        }));
+      let formattedTrips: any[] = [];
+      if (tripsData && tripsData.length > 0) {
+        const trainIds = tripsData.map(t => t.train_id);
+        const { data: stopsData } = await supabase
+          .from('train_stops')
+          .select('train_id, departure_time, arrival_time, stations(station_name)')
+          .in('train_id', trainIds);
+
+        formattedTrips = tripsData.map(t => {
+          const tStops = stopsData?.filter(s => s.train_id === t.train_id) || [];
+          tStops.sort((a, b) => {
+            const timeA = a.departure_time || a.arrival_time || '00:00';
+            const timeB = b.departure_time || b.arrival_time || '00:00';
+            return timeA.localeCompare(timeB);
+          });
+
+          let routeName = `ขบวน ${t.trains?.train_number || '?'}`;
+          let timeRange = '--:-- - --:--';
+          
+          if (tStops.length > 0) {
+            const first = tStops[0];
+            const last = tStops[tStops.length - 1];
+            routeName = `${first.stations?.station_name || '?'} ➔ ${last.stations?.station_name || '?'}`;
+            timeRange = `${first.departure_time?.substring(0,5) || '--:--'} - ${last.arrival_time?.substring(0,5) || '--:--'}`;
+          }
+
+          return {
+            id: t.id.toString(),
+            route: routeName,
+            date: formatThaiDate(t.departure_date), 
+            time: timeRange,
+            seat: `${t.available_seats || 40}/40`, 
+            status: t.status === 'Scheduled' ? 'เปิดจอง' : t.status === 'Completed' ? 'เดินทางแล้ว' : 'เต็มแล้ว',
+            statusColor: t.status === 'Scheduled' ? '#E8F5E9' : '#FFEBEE',
+            textColor: t.status === 'Scheduled' ? '#4CAF50' : '#F44336',
+            created_at: t.created_at
+          };
+        });
         setRecentTrips(formattedTrips);
       }
 
       // ==========================================
-      // 📜 3. ดึงประวัติการส่งข่าวสาร
+      // 📣 3. ประวัติการส่งข่าวสาร 
       // ==========================================
-      const { data: notifs } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(300);
+      const { data: notifs } = await supabase
+        .from('notifications')
+        .select('*')
+        .in('type', ['system', 'promotion', 'warning', 'info']) // รองรับทุกประเภทที่แอดมินส่ง
+        .order('created_at', { ascending: false })
+        .limit(300);
 
+      let uniqueBroadcasts: any[] = [];
       if (notifs) {
         const grouped = new Map();
         notifs.forEach(n => {
@@ -103,28 +133,37 @@ export default function AdminDashboardScreen() {
           if (!grouped.has(key)) {
             grouped.set(key, {
               id: n.id.toString(), title: n.title, message: n.message, type: n.type,
-              typeLabel: n.type === 'warning' ? 'ด่วน' : n.type === 'ticket' ? 'โปรโมชั่น' : 'ทั่วไป',
-              recipients: 1, time: timeAgo(n.created_at), created_at: new Date(n.created_at).getTime()
+              typeLabel: (n.type === 'system' || n.type === 'warning') ? 'ประกาศระบบ' : 'โปรโมชั่น',
+              recipients: 1, time: timeAgo(n.created_at), 
+              raw_time: n.created_at, 
+              created_at_ts: new Date(n.created_at).getTime()
             });
           } else {
             grouped.get(key).recipients += 1;
           }
         });
-        const uniqueBroadcasts = Array.from(grouped.values()).sort((a, b) => b.created_at - a.created_at).slice(0, 2);
-        setBroadcasts(uniqueBroadcasts);
+        uniqueBroadcasts = Array.from(grouped.values()).sort((a, b) => b.created_at_ts - a.created_at_ts);
+        setBroadcasts(uniqueBroadcasts.slice(0, 2)); 
       }
 
       // ==========================================
-      // 📝 4. สร้าง "กิจกรรมล่าสุด" 
+      // 🛠️ 4. กิจกรรมล่าสุด (เฉพาะของแอดมินล้วนๆ)
       // ==========================================
-      const { data: latestUsers } = await supabase.from('profiles').select('id, full_name, created_at').order('created_at', { ascending: false }).limit(2);
-      const { data: latestBookings } = await supabase.from('bookings').select('id, status, created_at').order('created_at', { ascending: false }).limit(3);
-      
       let allActs: any[] = [];
       
-      if (latestUsers) latestUsers.forEach(u => allActs.push({ id: `u_${u.id}`, title: `ผู้ใช้ใหม่ลงทะเบียน: ${u.full_name || 'ไม่ระบุชื่อ'}`, time: u.created_at, color: '#2196F3' }));
-      if (latestBookings) latestBookings.forEach(b => allActs.push({ id: `b_${b.id}`, title: b.status === 'Confirmed' ? `มีรายการจองตั๋วสำเร็จใหม่` : `มีคำสั่งซื้อรอดำเนินการ`, time: b.created_at, color: b.status === 'Confirmed' ? '#4CAF50' : '#FFB300' }));
-      if (tripsData) tripsData.slice(0,2).forEach(t => allActs.push({ id: `t_${t.id}`, title: `เพิ่มรอบเที่ยว ${t.trains?.origin?.station_name} ➔ ${t.trains?.dest?.station_name} สำเร็จ`, time: t.created_at, color: '#5E35B1' }));
+      if (formattedTrips.length > 0) {
+        formattedTrips.slice(0,2).forEach(t => allActs.push({ id: `t_${t.id}`, title: `เพิ่มรอบเที่ยวใหม่: ${t.route}`, time: t.created_at, color: '#5E35B1' }));
+      }
+
+      if (uniqueBroadcasts.length > 0) {
+        uniqueBroadcasts.slice(0,2).forEach(br => allActs.push({ id: `br_${br.id}`, title: `กระจายข่าวสาร: ${br.title}`, time: br.raw_time, color: '#D32F2F' }));
+      }
+
+      const { data: latestBanners } = await supabase.from('banners').select('id, title, created_at').order('created_at', { ascending: false }).limit(2);
+      if (latestBanners) latestBanners.forEach(b => allActs.push({ id: `b_${b.id}`, title: `จัดการแบนเนอร์: ${b.title || 'อัปเดตแบนเนอร์ใหม่'}`, time: b.created_at, color: '#F57F17' }));
+
+      const { data: latestCoupons } = await supabase.from('coupons').select('id, code, created_at').order('created_at', { ascending: false }).limit(2);
+      if (latestCoupons) latestCoupons.forEach(c => allActs.push({ id: `c_${c.id}`, title: `สร้างคูปองส่วนลด: ${c.code}`, time: c.created_at, color: '#00796B' }));
 
       allActs.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
       
@@ -132,7 +171,7 @@ export default function AdminDashboardScreen() {
       setActivities(formattedActivities);
 
     } catch (e) {
-      console.error(e);
+      console.error("Dashboard Realtime Error:", e);
     } finally {
       setLoading(false);
     }
@@ -150,15 +189,10 @@ export default function AdminDashboardScreen() {
               <Ionicons name="home" size={20} color="#FFF" />
               <Text style={styles.homeBtnText}>หน้าหลักลูกค้า</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity style={styles.profileCircle}>
-              <Text style={styles.profileInit}>A</Text>
-            </TouchableOpacity>
           </View>
 
           <View style={{paddingHorizontal: 25, marginTop: 15}}>
-            <Text style={styles.greetingText}>ศูนย์บัญชาการ 👋</Text>
-            <Text style={styles.adminName}>Admin Dashboard</Text>
+            <Text style={styles.greetingText}>ศูนย์บัญชาการ</Text>
           </View>
 
           <View style={styles.searchContainer}>
@@ -172,17 +206,13 @@ export default function AdminDashboardScreen() {
       {loading ? (
         <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
           <ActivityIndicator size="large" color="#5E35B1" />
-          <Text style={{marginTop: 10, color: '#757575'}}>กำลังดึงข้อมูล Real-time...</Text>
+          <Text style={{marginTop: 10, color: '#757575'}}>กำลังโหลดข้อมูลศูนย์บัญชาการ...</Text>
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>ข้อมูลระบบ RailGo (Real-time)</Text>
-            <TouchableOpacity style={styles.broadcastActionBtn} onPress={() => router.push('/admin-broadcast')}>
-              <Ionicons name="megaphone" size={14} color="#FFF" style={{marginRight: 5}}/>
-              <Text style={styles.broadcastActionText}>ส่งข่าวสารใหม่</Text>
-            </TouchableOpacity>
+            <Text style={styles.sectionTitle}>ข้อมูลระบบ RailGo</Text>
           </View>
 
           <View style={styles.statsGrid}>
@@ -225,7 +255,7 @@ export default function AdminDashboardScreen() {
           </View>
 
           <View style={styles.historyHeader}>
-            <Text style={styles.sectionTitle}>กิจกรรมล่าสุด</Text>
+            <Text style={styles.sectionTitle}>กิจกรรมล่าสุดของแอดมิน</Text>
           </View>
           <View style={styles.activityContainer}>
             {activities.map((act) => (
@@ -238,7 +268,6 @@ export default function AdminDashboardScreen() {
             {activities.length === 0 && <Text style={{color: '#9E9E9E', fontSize: 12}}>ยังไม่มีกิจกรรมเคลื่อนไหว</Text>}
           </View>
 
-          {/* 🚄 รอบเที่ยวล่าสุด */}
           <View style={[styles.historyHeader, {marginTop: 10}]}>
             <Text style={styles.sectionTitle}>รอบเที่ยวที่เพิ่มล่าสุด</Text>
             <TouchableOpacity onPress={() => router.push('/admin-trips')}><Text style={styles.viewAllText}>จัดการทั้งหมด</Text></TouchableOpacity>
@@ -274,12 +303,12 @@ export default function AdminDashboardScreen() {
 
           {broadcasts.map((item) => (
             <View key={item.id} style={styles.historyCard}>
-              <View style={[styles.cardTag, { backgroundColor: item.type === 'warning' ? '#F44336' : item.type === 'ticket' ? '#5E35B1' : '#2196F3' }]} />
+              <View style={[styles.cardTag, { backgroundColor: item.type === 'system' || item.type === 'warning' ? '#F44336' : '#5E35B1' }]} />
               <View style={styles.cardContent}>
                 <View style={styles.cardTopRow}>
                   <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                  <View style={[styles.badge, item.type === 'warning' ? styles.badgeWarning : styles.badgeInfo]}>
-                    <Text style={[styles.badgeText, { color: item.type === 'warning' ? '#F44336' : '#2196F3' }]}>{item.typeLabel}</Text>
+                  <View style={[styles.badge, item.type === 'system' || item.type === 'warning' ? styles.badgeWarning : styles.badgeInfo]}>
+                    <Text style={[styles.badgeText, { color: item.type === 'system' || item.type === 'warning' ? '#F44336' : '#2196F3' }]}>{item.typeLabel}</Text>
                   </View>
                 </View>
                 <Text style={styles.cardMessage} numberOfLines={2}>{item.message}</Text>
@@ -311,17 +340,12 @@ const styles = StyleSheet.create({
   headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 25, paddingTop: 10 },
   homeBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 },
   homeBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 6 },
-  profileCircle: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: '#6C63FF', justifyContent: 'center', alignItems: 'center' },
-  profileInit: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  greetingText: { color: '#B0B2C3', fontSize: 14 },
-  adminName: { color: '#FFF', fontSize: 24, fontWeight: 'bold' },
+  greetingText: { color: '#FFF', fontSize: 24, fontWeight: 'bold' },
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1A1C3E', marginHorizontal: 25, marginTop: 20, borderRadius: 20, height: 45 },
   searchInput: { flex: 1, color: '#FFF', marginLeft: 10, fontSize: 14 },
   scrollContent: { padding: 20, paddingBottom: 50 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#E0E0E0', paddingBottom: 10, marginBottom: 15 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  broadcastActionBtn: { flexDirection: 'row', backgroundColor: '#262956', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, alignItems: 'center' },
-  broadcastActionText: { color: '#FFF', fontSize: 11, fontWeight: 'bold' },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 10 },
   statCard: { width: '48%', backgroundColor: '#FFF', borderRadius: 20, padding: 15, flexDirection: 'row', alignItems: 'center', elevation: 2, marginBottom: 10 },
   statIconBox: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
