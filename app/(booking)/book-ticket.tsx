@@ -25,7 +25,6 @@ export default function BookTicketScreen() {
 
   const [activeModal, setActiveModal] = useState<string | null>(null);
 
-  // 🆕 State สำหรับ Modern Alert
   const [alertConfig, setAlertConfig] = useState({ visible: false, title: '', message: '' });
 
   const [depMonthOffset, setDepMonthOffset] = useState(0);
@@ -47,7 +46,6 @@ export default function BookTicketScreen() {
     setLoadingStations(false);
   };
 
-  // 🆕 ฟังก์ชันเรียกใช้ Alert แบบใหม่
   const showAlert = (title: string, message: string) => {
     setAlertConfig({ visible: true, title, message });
   };
@@ -103,18 +101,14 @@ export default function BookTicketScreen() {
     return { bg: '#F5F5F5', color: '#757575', icon: 'train' }; 
   };
 
-  // 🛡️ แก้ไขตรงนี้: เพิ่มเคส ตะวันออก และ ตะวันตก
   const getStationStyle = (item: any) => {
     const region = item.region || ''; 
     if (region === 'ใต้') return { bg: '#FCE4EC', iconColor: '#E91E63', badgeText: 'สายใต้', badgeBg: '#E8F5E9', badgeTextColor: '#4CAF50' };
     if (region === 'เหนือ') return { bg: '#E0E0E0', iconColor: '#757575', badgeText: 'สายเหนือ', badgeBg: '#BDBDBD', badgeTextColor: '#333' };
     if (region === 'อีสาน') return { bg: '#EDE7F6', iconColor: '#5E35B1', badgeText: 'สายตะวันออกเฉียงเหนือ', badgeBg: '#D1C4E9', badgeTextColor: '#5E35B1' };
     if (region === 'กลาง') return { bg: '#FFF3E0', iconColor: '#FF9800', badgeText: 'สายกลาง', badgeBg: '#FFE0B2', badgeTextColor: '#FF9800' };
-    
-    // 🚩 เพิ่ม 2 ภาคนี้เพื่อให้ป้ายขึ้น
     if (region === 'ตะวันออก') return { bg: '#FFF9C4', iconColor: '#FBC02D', badgeText: 'สายตะวันออก', badgeBg: '#FFFDE7', badgeTextColor: '#FBC02D' };
     if (region === 'ตะวันตก') return { bg: '#FBE9E7', iconColor: '#FF5722', badgeText: 'สายตะวันตก', badgeBg: '#FFEBEE', badgeTextColor: '#FF5722' };
-    
     return { bg: '#D1C4E9', iconColor: '#5E35B1', badgeText: '', badgeBg: 'transparent', badgeTextColor: 'transparent' };
   };
 
@@ -161,11 +155,13 @@ export default function BookTicketScreen() {
       return [newSearch, ...filtered].slice(0, 5); 
     });
 
+    // 🚀 เพิ่มส่งข้อมูลชุดนี้ไปให้ครบ!
     router.push({
       pathname: '/(booking)/search-results',
       params: { 
-        origin, destination, departureDate, trainType, cabinClass, cabinNumber, 
-        adults: passengers.adult, children: passengers.child, infants: passengers.infant 
+        origin, destination, departureDate, returnDate, tripType, trainType, cabinClass, cabinNumber, 
+        adults: passengers.adult, children: passengers.child, infants: passengers.infant,
+        isReturnLeg: 'false' // 🚩 บอกว่าเป็นขาไปนะ 
       }
     });
   };
@@ -223,7 +219,6 @@ export default function BookTicketScreen() {
     );
   };
 
-  // 🛡️ เพิ่ม สายตะวันออก/ตก ในตัวกรอง
   const regionFilters = [
     { id: 'ทั้งหมด', label: 'ทั้งหมด' },
     { id: 'กลาง', label: 'สายกลาง' },
@@ -414,7 +409,6 @@ export default function BookTicketScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 🆕 Modern Alert Modal */}
       <Modal visible={alertConfig.visible} transparent animationType="fade">
         <View style={styles.alertOverlay}>
           <View style={styles.alertBox}>
@@ -696,7 +690,6 @@ const styles = StyleSheet.create({
   lineBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
   lineBadgeText: { fontSize: 10, fontWeight: 'bold' },
 
-  /* 🆕 Modern Alert Styles */
   alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 30 },
   alertBox: { width: '100%', backgroundColor: '#FFF', borderRadius: 30, padding: 25, alignItems: 'center', elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.3, shadowRadius: 10 },
   alertIconBg: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#FFF9C4', justifyContent: 'center', alignItems: 'center', marginBottom: 20, borderWidth: 5, borderColor: '#FFF', marginTop: -60, elevation: 5 },

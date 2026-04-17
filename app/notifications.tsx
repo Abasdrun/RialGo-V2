@@ -20,6 +20,9 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'all' | 'ticket' | 'promotion' | 'system'>('all');
+  
+  // 🚀 State สำหรับจำว่าการ์ดไหนโดนกดกางออกบ้าง
+  const [expandedIds, setExpandedIds] = useState<string[]>([]);
 
   useEffect(() => {
     fetchNotifications();
@@ -39,7 +42,6 @@ export default function NotificationsScreen() {
         if (data && data.length > 0) {
           setNotifications(data);
         } else {
-          // 🛡️ Fallback Mock Data เอาไว้โชว์ UI สวยๆ เผื่อ DB โล่ง
           setNotifications(mockNotifications);
         }
       } else {
@@ -52,7 +54,6 @@ export default function NotificationsScreen() {
     }
   };
 
-  // ฟังก์ชันกด "อ่านทั้งหมด"
   const markAllAsRead = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -65,7 +66,23 @@ export default function NotificationsScreen() {
     }
   };
 
-  // ฟังก์ชันแปลงเวลา (เช่น 2 นาทีที่แล้ว)
+  // 🚀 อ่านเฉพาะรายตัวเวลากด
+  const markSingleAsRead = async (id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
   const timeAgo = (dateStr: string) => {
     const now = new Date();
     const past = new Date(dateStr);
@@ -81,19 +98,20 @@ export default function NotificationsScreen() {
     return `${diffDays} วันที่แล้ว`;
   };
 
-  // แยกกลุ่ม "วันนี้" กับ "เมื่อวาน/ก่อนหน้า"
   const isToday = (dateStr: string) => {
     const date = new Date(dateStr);
     const today = new Date();
     return date.getDate() === today.getDate() && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
   };
 
+  // 🚀 เปลี่ยนไอคอนแอดมิน (system) ให้โคตรเด่น สีส้มแดง (Deep Orange) โทรโข่งประกาศ
   const getIconData = (type: string) => {
     switch (type) {
       case 'ticket': return { icon: 'ticket-confirmation-outline', color: '#4CAF50', bg: '#E8F5E9', action: 'ดูตั๋ว →' };
-      case 'promotion': return { icon: 'tag-outline', color: '#FBC02D', bg: '#FFF9C4', action: 'ใช้เลย →' };
+      case 'promotion': return { icon: 'tag-outline', color: '#FBC02D', bg: '#FFF9C4', action: 'ใช้โปรโมชั่น →' };
       case 'reward': return { icon: 'star-outline', color: '#5E35B1', bg: '#EDE7F6', action: 'ดูคะแนน →' };
-      default: return { icon: 'account-group-outline', color: '#9E9E9E', bg: '#F5F5F5', action: '' };
+      case 'system': return { icon: 'bullhorn-outline', color: '#FF5722', bg: '#FBE9E7', action: 'รับทราบ' };
+      default: return { icon: 'bell-outline', color: '#9E9E9E', bg: '#F5F5F5', action: '' };
     }
   };
 
@@ -104,12 +122,18 @@ export default function NotificationsScreen() {
 
   const renderNotification = (item: Notification) => {
     const iconData = getIconData(item.type);
+    const isExpanded = expandedIds.includes(item.id);
+    const isLongText = item.message.length > 45; // เช็คว่าข้อความยาวพอจะกางได้ไหม
     
     return (
       <TouchableOpacity 
         key={item.id} 
         style={[styles.notiCard, item.is_read ? styles.notiCardRead : styles.notiCardUnread]}
         activeOpacity={0.7}
+        onPress={() => {
+          if (!item.is_read) markSingleAsRead(item.id);
+          toggleExpand(item.id);
+        }}
       >
         <View style={[styles.iconBox, { backgroundColor: iconData.bg }]}>
           <MaterialCommunityIcons name={iconData.icon as any} size={24} color={iconData.color} />
@@ -117,15 +141,39 @@ export default function NotificationsScreen() {
         
         <View style={styles.notiContent}>
           <Text style={styles.notiTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.notiMessage} numberOfLines={2}>{item.message}</Text>
+          
+          {/* 🚀 ตัดคำถ้าไม่ได้กางออก ถ้ายาวให้มีคำว่า อ่านเพิ่มเติม */}
+          <Text style={styles.notiMessage} numberOfLines={isExpanded ? undefined : 2}>
+            {item.message}
+          </Text>
+          
+          {!isExpanded && isLongText && (
+            <Text style={styles.readMoreText}>อ่านเพิ่มเติม...</Text>
+          )}
           
           <View style={styles.notiFooter}>
             <View style={styles.timeRow}>
               <Ionicons name="time-outline" size={12} color="#9E9E9E" />
               <Text style={styles.timeText}> {timeAgo(item.created_at)}</Text>
             </View>
+
+            {/* 🚀 ปุ่ม Action แยกต่างหาก พอกดแล้ววาร์ปได้เลย */}
             {iconData.action !== '' && (
-              <Text style={[styles.actionText, {color: iconData.color}]}>{iconData.action}</Text>
+              <TouchableOpacity 
+                style={styles.actionBtn}
+                onPress={(e) => {
+                  if (!item.is_read) markSingleAsRead(item.id);
+                  if (item.type === 'ticket') {
+                    // วาร์ปไปหน้าตั๋วของฉัน
+                    router.push('/my-ticket'); 
+                  } else if (item.type === 'system') {
+                    // แอดมินบังคับให้รู้แล้วกางอ่าน
+                    if (!isExpanded) toggleExpand(item.id);
+                  }
+                }}
+              >
+                <Text style={[styles.actionText, {color: iconData.color}]}>{iconData.action}</Text>
+              </TouchableOpacity>
             )}
           </View>
         </View>
@@ -138,7 +186,6 @@ export default function NotificationsScreen() {
   return (
     <View style={styles.container}>
       
-      {/* 🌊 Header สีน้ำเงินเข้ม */}
       <View style={styles.blueHeaderBg}>
         <View style={styles.headerGraphicCircle} />
       </View>
@@ -158,7 +205,6 @@ export default function NotificationsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* 🔘 Tabs Filter */}
         <View style={styles.tabScrollWrapper}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabContainer}>
             <TouchableOpacity style={[styles.tabBtn, activeTab === 'all' ? styles.tabBtnActive : styles.tabBtnInactive]} onPress={() => setActiveTab('all')}>
@@ -251,11 +297,13 @@ const styles = StyleSheet.create({
   
   notiContent: { flex: 1, justifyContent: 'center' },
   notiTitle: { fontSize: 14, fontWeight: 'bold', color: '#333', marginBottom: 4 },
-  notiMessage: { fontSize: 11, color: '#757575', lineHeight: 16, marginBottom: 10 },
+  notiMessage: { fontSize: 11, color: '#757575', lineHeight: 18, marginBottom: 5 }, // 🚀 เพิ่ม lineHeight ให้อ่านง่าย
+  readMoreText: { fontSize: 10, color: '#5E35B1', fontWeight: 'bold', marginBottom: 10, marginTop: -3 }, // 🚀 ตัวอักษรอ่านเพิ่มเติม
   
-  notiFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  notiFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 },
   timeRow: { flexDirection: 'row', alignItems: 'center' },
   timeText: { fontSize: 10, color: '#9E9E9E' },
+  actionBtn: { paddingVertical: 5, paddingHorizontal: 10, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.03)' }, // 🚀 กรอบปุ่ม action 
   actionText: { fontSize: 11, fontWeight: 'bold' },
 
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#5E35B1', position: 'absolute', top: 15, right: 15 },
@@ -263,11 +311,3 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', marginTop: 50 },
   emptyText: { color: '#9E9E9E', marginTop: 15, fontSize: 14 },
 });
-
-// ข้อมูลจำลองเผื่อ Database ยังไม่มีข้อมูล จะได้โชว์ UI สวยๆ
-const mockNotifications: Notification[] = [
-  { id: '1', title: 'จองตั๋วสำเร็จ!', message: 'กรุงเทพ → เชียงใหม่ · 27 มี.ค. 2026 · 18:10 น.\nที่นั่ง A1 ตู้ 8 ชั้น 2', type: 'ticket', is_read: false, created_at: new Date(Date.now() - 2 * 60000).toISOString() },
-  { id: '2', title: 'โปรสงกรานต์ 30% OFF!', message: 'ใช้โค้ด SONGKRAN30 ซื้อตั๋วช่วง 9-15 เม.ย.\nลดทันที 30% ทุกเส้นทาง', type: 'promotion', is_read: false, created_at: new Date(Date.now() - 60 * 60000).toISOString() },
-  { id: '3', title: 'ได้รับ 38 คะแนนสะสม', message: 'คะแนนสะสมจากการจองตั๋ว ปัจจุบัน\nมี 2,388 คะแนน', type: 'reward', is_read: true, created_at: new Date(Date.now() - 180 * 60000).toISOString() },
-  { id: '4', title: 'ยืนยันบัญชีสำเร็จ', message: 'บัญชีของคุณได้รับการยืนยันแล้ว ยินดีต้อนรับสู่ RailGo!', type: 'system', is_read: true, created_at: new Date(Date.now() - 25 * 60 * 60000).toISOString() }
-];

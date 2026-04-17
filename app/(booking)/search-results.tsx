@@ -9,7 +9,13 @@ const { width } = Dimensions.get('window');
 
 export default function SearchResultsScreen() {
   const params = useLocalSearchParams();
-  const { origin, destination, departureDate, trainType, cabinClass, cabinNumber, adults, children } = params;
+  const { origin, destination, departureDate, returnDate, tripType, trainType, cabinClass, cabinNumber, adults, children, isReturnLeg } = params;
+
+  // 🚀 LOGIC: เช็คว่าเป็นขาไปหรือขากลับ
+  const isReturn = isReturnLeg === 'true';
+  const currentOrigin = isReturn ? String(destination) : String(origin);
+  const currentDest = isReturn ? String(origin) : String(destination);
+  const currentDate = isReturn ? String(returnDate) : String(departureDate);
 
   const [loading, setLoading] = useState(true);
   const [distance, setDistance] = useState(0);
@@ -37,11 +43,10 @@ export default function SearchResultsScreen() {
     setLoading(true);
 
     try {
-      // 1. หา ID และระยะทางของสถานีต้นทาง-ปลายทาง
       const { data: stData } = await supabase
         .from('stations')
         .select('id, station_name, km')
-        .in('station_name', [String(origin), String(destination)]);
+        .in('station_name', [currentOrigin, currentDest]);
 
       let originId = null;
       let destId = null;
@@ -49,8 +54,8 @@ export default function SearchResultsScreen() {
       let destKm = 0;
 
       if (stData && stData.length === 2) {
-        const oSt = stData.find(s => s.station_name === origin);
-        const dSt = stData.find(s => s.station_name === destination);
+        const oSt = stData.find(s => s.station_name === currentOrigin);
+        const dSt = stData.find(s => s.station_name === currentDest);
         if (oSt && dSt) {
           originId = oSt.id;
           destId = dSt.id;
@@ -66,7 +71,6 @@ export default function SearchResultsScreen() {
         return;
       }
 
-      // 2. หาขบวนรถที่ผ่านสถานีต้นทางและปลายทาง (และทิศทางถูกต้อง)
       const { data: originStops } = await supabase.from('train_stops').select('train_id, stop_order, departure_time').eq('station_id', originId);
       const { data: destStops } = await supabase.from('train_stops').select('train_id, stop_order, arrival_time').eq('station_id', destId);
 
@@ -92,9 +96,8 @@ export default function SearchResultsScreen() {
       }
 
       const validTrainIds = validRoutes.map(r => r.train_id);
-      const dbDate = parseThaiDateToDB(String(departureDate));
+      const dbDate = parseThaiDateToDB(currentDate);
 
-      // 3. ค้นหารอบรถวิ่งประจำวัน (Trips)
       const { data: tripData } = await supabase
         .from('trips')
         .select(`
@@ -110,14 +113,12 @@ export default function SearchResultsScreen() {
         .eq('status', 'Scheduled');
 
       if (tripData && tripData.length > 0) {
-        // 4. นำข้อมูลมาผนวกกัน และนับที่นั่งว่าง Real-time
         const formattedTrips = await Promise.all(tripData.map(async (t: any) => {
           
           const routeInfo = validRoutes.find(r => r.train_id === t.train_id);
           const exactDep = routeInfo?.dep_time || '00:00';
           const exactArr = routeInfo?.arr_time || getFallbackArrivalTime(exactDep, Math.abs(originKm - destKm));
 
-          // นับที่นั่งจองแล้วจากตาราง bookings
           const { data: bookingsData } = await supabase.from('bookings').select('selected_seats').eq('trip_id', t.id);
           let bookedCount = 0;
           if (bookingsData) {
@@ -136,7 +137,6 @@ export default function SearchResultsScreen() {
             id: t.id,
             dep: exactDep,
             arr: exactArr,
-            // 🚀 เรียกใช้ฟังก์ชันคำนวณเวลาเดินทางตรงนี้เลย!
             durationText: calculateRealDuration(exactDep, exactArr),
             remainingSeats: remainingSeats,
             isFull: remainingSeats < totalPax
@@ -155,14 +155,13 @@ export default function SearchResultsScreen() {
     }
   };
 
-  // 🧮 ฟังก์ชันคำนวณระยะเวลาเดินทางแบบของจริง (คำนวณจากเวลาออก - เวลาถึง)
   const calculateRealDuration = (dep: string, arr: string) => {
     if (!dep || !arr) return '--ชม. --น.';
     const [dh, dm] = dep.split(':').map(Number);
     const [ah, am] = arr.split(':').map(Number);
     
     let mins = (ah * 60 + am) - (dh * 60 + dm);
-    if (mins < 0) mins += 24 * 60; // 🌟 กรณีวิ่งข้ามคืนมันจะบวก 24 ชม. ให้เลย
+    if (mins < 0) mins += 24 * 60; 
     
     const h = Math.floor(mins / 60);
     const m = mins % 60;
@@ -193,24 +192,23 @@ export default function SearchResultsScreen() {
             <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}>
               <Ionicons name="chevron-back" size={24} color="#FFF" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>เวลาออกเดินทาง</Text>
+            <Text style={styles.headerTitle}>{isReturn ? 'เลือกรอบรถ (ขากลับ)' : 'เวลาออกเดินทาง'}</Text>
             <View style={{width: 40}} />
           </View>
 
           <View style={styles.routeSummaryBox}>
             <View style={styles.routeCol}>
-              <Text style={styles.routeCity} numberOfLines={1}>{origin}</Text>
+              <Text style={styles.routeCity} numberOfLines={1}>{currentOrigin}</Text>
               <Text style={styles.routeTimeSmall}>{realSchedules[0] ? realSchedules[0].dep : '--:--'}น.</Text>
             </View>
             <View style={styles.routeCenter}>
               <Ionicons name="arrow-forward" size={24} color="#D1C4E9" />
               <View style={styles.durationBadge}>
-                {/* 🚀 โชว์เวลาเดินทางรวมที่คำนวณแล้ว ตรงแถบด้านบน */}
                 <Text style={styles.durationBadgeText}>{realSchedules[0] ? realSchedules[0].durationText : '--'}</Text>
               </View>
             </View>
             <View style={styles.routeCol}>
-              <Text style={styles.routeCity} numberOfLines={1}>{destination}</Text>
+              <Text style={styles.routeCity} numberOfLines={1}>{currentDest}</Text>
               <Text style={styles.routeTimeSmall}>{realSchedules[0] ? realSchedules[0].arr : '--:--'}น.</Text>
             </View>
           </View>
@@ -223,7 +221,7 @@ export default function SearchResultsScreen() {
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           
-          <Text style={styles.dateSubTitle}>{departureDate} • {realSchedules.length} เที่ยว</Text>
+          <Text style={styles.dateSubTitle}>{currentDate} • {realSchedules.length} เที่ยว</Text>
 
           {realSchedules.length === 0 ? (
             <View style={styles.emptyContainer}>
@@ -238,7 +236,7 @@ export default function SearchResultsScreen() {
                 <View key={item.id} style={[styles.tripCard, isFull && styles.tripCardFull]}>
                   
                   <View style={styles.cardHeaderInfo}>
-                    <Text style={styles.trainInfoMain}>{trainType} • {destination}</Text>
+                    <Text style={styles.trainInfoMain}>{trainType} • {currentDest}</Text>
                     <Text style={styles.trainInfoSub}>{cabinClass}</Text>
                   </View>
 
@@ -252,12 +250,11 @@ export default function SearchResultsScreen() {
                   </View>
 
                   <View style={styles.stationRow}>
-                    <View style={styles.stationSideBlock}><Text style={styles.stationSmall} numberOfLines={1}>{origin}</Text></View>
+                    <View style={styles.stationSideBlock}><Text style={styles.stationSmall} numberOfLines={1}>{currentOrigin}</Text></View>
                     <View style={styles.durationBlock}>
-                      {/* 🚀 โชว์เวลาเดินทางรวมที่คำนวณแล้ว ตรงกลางการ์ด */}
                       <Text style={styles.durationTextCenter}>{item.durationText}</Text>
                     </View>
-                    <View style={[styles.stationSideBlock, {alignItems: 'flex-end'}]}><Text style={styles.stationSmall} numberOfLines={1}>{destination}</Text></View>
+                    <View style={[styles.stationSideBlock, {alignItems: 'flex-end'}]}><Text style={styles.stationSmall} numberOfLines={1}>{currentDest}</Text></View>
                   </View>
 
                   <View style={styles.dashedDivider} />
@@ -280,7 +277,6 @@ export default function SearchResultsScreen() {
                     <TouchableOpacity 
                       style={[styles.selectBtn, isFull && styles.selectBtnDisabled]}
                       onPress={() => {
-                        // ส่งข้อมูลทั้งหมดไปหน้าเลือกที่นั่ง
                         router.push({
                           pathname: '/(booking)/select-seat',
                           params: { ...params, depTime: item.dep, arrTime: item.arr, duration: item.durationText, trip_id: item.id }

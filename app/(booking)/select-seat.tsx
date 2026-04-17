@@ -11,6 +11,12 @@ export default function SelectSeatScreen() {
   const params = useLocalSearchParams();
   const { origin, destination, departureDate, trainType, cabinClass, cabinNumber: initialCabin, adults, children, infants, depTime, arrTime, duration, trip_id } = params;
 
+  // 🚀 LOGIC เช็คว่าเป็นขากลับไหม จะได้หาระยะทางและข้อมูลถูก
+  const isReturn = params.isReturnLeg === 'true';
+  const isRoundTrip = params.tripType === 'round-trip';
+  const currentOrigin = isReturn ? String(destination) : String(origin);
+  const currentDest = isReturn ? String(origin) : String(destination);
+
   const totalPax = Number(adults) + Number(children); 
   
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
@@ -19,7 +25,6 @@ export default function SelectSeatScreen() {
   const [loading, setLoading] = useState(true);
   const [currentCabinNum, setCurrentCabinNum] = useState(String(initialCabin));
 
-  // 🆕 State สำหรับ Modern Alert
   const [alertConfig, setAlertConfig] = useState({ visible: false, title: '', message: '' });
 
   useEffect(() => {
@@ -28,7 +33,7 @@ export default function SelectSeatScreen() {
 
   const fetchInitialData = async () => {
     setLoading(true);
-    const { data: stData } = await supabase.from('stations').select('km').in('station_name', [String(origin), String(destination)]);
+    const { data: stData } = await supabase.from('stations').select('km').in('station_name', [currentOrigin, currentDest]);
     if (stData && stData.length === 2) {
       setDistance(Math.abs(stData[0].km - stData[1].km));
     }
@@ -52,7 +57,6 @@ export default function SelectSeatScreen() {
     setLoading(false);
   };
 
-  // 🆕 ฟังก์ชันเรียกใช้ Alert แบบใหม่
   const showAlert = (title: string, message: string) => {
     setAlertConfig({ visible: true, title, message });
   };
@@ -100,7 +104,6 @@ export default function SelectSeatScreen() {
       if (selectedSeats.length < totalPax) {
         setSelectedSeats([...selectedSeats, seatId]);
       } else {
-        // 🚀 [แก้ไข] เปลี่ยนจาก alert(...) เป็น showAlert(...)
         showAlert('เลือกที่นั่งครบแล้ว', `คุณเลือกที่นั่งครบตามจำนวนผู้โดยสาร (${totalPax} ท่าน) แล้วครับ`);
       }
     }
@@ -154,7 +157,7 @@ export default function SelectSeatScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}>
             <Ionicons name="chevron-back" size={24} color="#FFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>ขบวน{trainType}</Text>
+          <Text style={styles.headerTitle}>ขบวน{trainType} {isReturn && '(ขากลับ)'}</Text>
           <View style={{width: 40}} />
         </View>
 
@@ -262,25 +265,47 @@ export default function SelectSeatScreen() {
               <Text style={styles.footerPrice}>THB {getTotalPrice().toLocaleString('en-US', {minimumFractionDigits: 2})}</Text>
            </View>
         </View>
+        
+        {/* 🚀 LOGIC พระเอก: ไปหน้า Summary หรือ เด้งไปเลือกขากลับ */}
         <TouchableOpacity 
             style={[styles.confirmBtn, selectedSeats.length !== totalPax && {backgroundColor: '#9E9E9E'}]}
             disabled={selectedSeats.length !== totalPax}
-            onPress={() => router.push({
-              pathname: '/(booking)/summary',
-              params: {
-                ...params,
-                cabinNumber: currentCabinNum, 
-                selectedSeats: selectedSeats.join(', '),
-                totalPrice: getTotalPrice()
+            onPress={() => {
+              if (isRoundTrip && !isReturn) {
+                router.push({
+                  pathname: '/(booking)/search-results',
+                  params: {
+                    ...params,
+                    isReturnLeg: 'true',
+                    outboundTripId: trip_id,
+                    outboundSeats: selectedSeats.join(', '),
+                    outboundPrice: getTotalPrice(),
+                    outboundDepTime: depTime,
+                    outboundArrTime: arrTime,
+                    outboundCabin: currentCabinNum,
+                    outboundDuration: duration
+                  }
+                });
+              } else {
+                router.push({
+                  pathname: '/(booking)/summary',
+                  params: {
+                    ...params,
+                    cabinNumber: currentCabinNum, 
+                    selectedSeats: selectedSeats.join(', '),
+                    totalPrice: isReturn ? (Number(params.outboundPrice) + getTotalPrice()) : getTotalPrice()
+                  }
+                });
               }
-            })}
+            }}
         >
-            <Ionicons name="checkmark" size={20} color="#FFF" style={{marginRight: 10}} />
-            <Text style={styles.confirmBtnText}>ยืนยันที่นั่ง {selectedSeats.length} นั่ง</Text>
+            <Ionicons name={isRoundTrip && !isReturn ? "arrow-forward" : "checkmark"} size={20} color="#FFF" style={{marginRight: 10}} />
+            <Text style={styles.confirmBtnText}>
+              {isRoundTrip && !isReturn ? 'ยืนยัน และ เลือกเที่ยวกลับ' : `ยืนยันที่นั่ง ${selectedSeats.length} นั่ง`}
+            </Text>
         </TouchableOpacity>
       </View>
 
-      {/* 🔔 [เพิ่มใหม่] Modern Alert Modal */}
       <Modal visible={alertConfig.visible} transparent animationType="fade">
         <View style={styles.alertOverlay}>
           <View style={styles.alertBox}>
@@ -346,8 +371,6 @@ const styles = StyleSheet.create({
   footerPrice: { color: '#333', fontSize: 20, fontWeight: 'bold' },
   confirmBtn: { backgroundColor: '#5E35B1', flexDirection: 'row', paddingVertical: 15, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
   confirmBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-
-  /* 🆕 Modern Alert Styles (เหมือนหน้าก่อนหน้า) */
   alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 30 },
   alertBox: { width: '100%', backgroundColor: '#FFF', borderRadius: 30, padding: 25, alignItems: 'center', elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.3, shadowRadius: 10 },
   alertIconBg: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#EBE4FF', justifyContent: 'center', alignItems: 'center', marginBottom: 20, borderWidth: 5, borderColor: '#FFF', marginTop: -60, elevation: 5 },

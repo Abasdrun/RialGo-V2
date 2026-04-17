@@ -12,32 +12,24 @@ export default function SummaryScreen() {
   const { 
     tripType, origin, destination, departureDate, returnDate, 
     trainType, cabinClass, cabinNumber, adults, children, 
-    depTime, arrTime, duration, selectedSeats, totalPrice, trip_id 
+    depTime, arrTime, duration, selectedSeats, totalPrice, trip_id,
+    outboundTripId, outboundSeats, outboundPrice, outboundDepTime, outboundArrTime, outboundCabin, outboundDuration
   } = params;
 
   const [paymentMethod, setPaymentMethod] = useState('qr');
   const [loading, setLoading] = useState(false);
 
-  // 🆕 State สำหรับ Modern Alert (เพิ่มเข้าไปจากเดิม)
   const [alertConfig, setAlertConfig] = useState({ 
-    visible: false, 
-    title: '', 
-    message: '', 
-    type: 'success' as 'success' | 'error',
-    onConfirm: () => {} 
+    visible: false, title: '', message: '', type: 'success' as 'success' | 'error', onConfirm: () => {} 
   });
 
   const totalPax = Number(adults) + Number(children);
-  const finalPrice = Number(totalPrice);
-  const netPrice = tripType === 'round-trip' ? finalPrice * 2 : finalPrice;
+  // 🚀 FIXED: ไม่ต้องคูณสองแล้ว เพราะมันบวกกันมาให้เสร็จจากหน้าเลือกที่นั่งแล้ว
+  const netPrice = Number(totalPrice); 
 
-  // 🆕 ฟังก์ชันช่วยแสดง Alert (เพิ่มเข้าไป)
   const showAlert = (title: string, message: string, type: 'success' | 'error', onConfirm?: () => void) => {
     setAlertConfig({
-      visible: true,
-      title,
-      message,
-      type,
+      visible: true, title, message, type,
       onConfirm: onConfirm || (() => setAlertConfig(prev => ({ ...prev, visible: false })))
     });
   };
@@ -64,37 +56,47 @@ export default function SummaryScreen() {
       const originId = stData.find(s => s.station_name === origin)?.id;
       const destId = stData.find(s => s.station_name === destination)?.id;
 
-      const { error } = await supabase.from('bookings').insert([
-          {
+      // 🚀 สร้างข้อมูล Booking ของทั้ง 2 ขา (ถ้ามี)
+      const bookingsToInsert = [];
+
+      // 1. ตั๋วขาไป
+      bookingsToInsert.push({
+          user_id: user.id,
+          origin_station_id: originId,
+          destination_station_id: destId,
+          total_price: tripType === 'round-trip' ? Number(outboundPrice) : netPrice,
+          status: 'Confirmed',
+          trip_id: tripType === 'round-trip' ? outboundTripId : trip_id, 
+          selected_seats: tripType === 'round-trip' ? String(outboundSeats) : String(selectedSeats) 
+      });
+
+      // 2. ตั๋วขากลับ
+      if (tripType === 'round-trip') {
+          bookingsToInsert.push({
               user_id: user.id,
-              origin_station_id: originId,
-              destination_station_id: destId,
-              total_price: netPrice,
+              origin_station_id: destId, // สลับสถานีกัน
+              destination_station_id: originId,
+              total_price: netPrice - Number(outboundPrice),
               status: 'Confirmed',
               trip_id: trip_id, 
-              selected_seats: String(selectedSeats) 
-          }
-      ]);
+              selected_seats: String(selectedSeats)
+          });
+      }
 
+      const { error } = await supabase.from('bookings').insert(bookingsToInsert);
       if (error) throw error;
 
       await supabase.from('notifications').insert([{
           user_id: user.id,
           title: 'จองตั๋วสำเร็จ! 🎉',
-          message: `การจองตั๋วของคุณจาก ${origin} ไปยัง ${destination} สำหรับ ${totalPax} ท่าน ได้รับการยืนยันแล้ว`,
+          message: `การจองตั๋วของคุณจาก ${origin} ไปยัง ${destination} ${tripType === 'round-trip' ? '(ไป-กลับ)' : ''} ได้รับการยืนยันแล้ว`,
           type: 'ticket'
       }]);
 
-      // ✅ แสดงความสำเร็จและเปลี่ยนหน้า
-      showAlert(
-        'ชำระเงินสำเร็จ!', 
-        'บันทึกตั๋วของคุณเรียบร้อยแล้ว เตรียมตัวเดินทางได้เลย 🚂', 
-        'success',
-        () => {
+      showAlert('ชำระเงินสำเร็จ!', 'บันทึกตั๋วของคุณเรียบร้อยแล้ว เตรียมตัวเดินทางได้เลย 🚂', 'success', () => {
           setAlertConfig(prev => ({ ...prev, visible: false }));
           router.push({ pathname: '/my-ticket', params: { ...params } });
-        }
-      );
+      });
 
     } catch (error: any) {
       showAlert('เกิดข้อผิดพลาด', error.message || 'ไม่สามารถบันทึกข้อมูลได้', 'error');
@@ -118,12 +120,20 @@ export default function SummaryScreen() {
     return `${totalPax} คน - ที่นั่งหมายเลข ${formatted.join(', ')}`;
   };
 
-  const renderTicketCard = (type: 'go' | 'return', price: number) => {
+  const renderTicketCard = (type: 'go' | 'return') => {
     const isGo = type === 'go';
     const cardOrigin = isGo ? origin : destination;
     const cardDest = isGo ? destination : origin;
-    const cardDepTime = isGo ? depTime : arrTime; 
-    const cardArrTime = isGo ? arrTime : depTime;
+    
+    // 🚀 ดึงข้อมูลแยกของแต่ละขามาแสดงให้ถูกต้อง
+    const cardDepTime = isGo && tripType === 'round-trip' ? outboundDepTime : depTime;
+    const cardArrTime = isGo && tripType === 'round-trip' ? outboundArrTime : arrTime;
+    const cardCabin = isGo && tripType === 'round-trip' ? outboundCabin : cabinNumber;
+    const cardSeats = isGo && tripType === 'round-trip' ? outboundSeats : selectedSeats;
+    const cardDuration = isGo && tripType === 'round-trip' ? outboundDuration : duration;
+    const cardPrice = isGo && tripType === 'round-trip' 
+      ? Number(outboundPrice) 
+      : (tripType === 'round-trip' ? (netPrice - Number(outboundPrice)) : netPrice);
 
     return (
       <View style={styles.ticketCard}>
@@ -135,7 +145,7 @@ export default function SummaryScreen() {
           <View style={styles.routeHeaderRow}>
             <Text style={styles.cityTextMain}>{cardOrigin}</Text>
             <View style={styles.arrowContainer}>
-                <Text style={styles.durationSmallText}>{duration}</Text>
+                <Text style={styles.durationSmallText}>{cardDuration}</Text>
                 <Ionicons name="arrow-forward" size={20} color="#BDBDBD" />
             </View>
             <Text style={styles.cityTextMain}>{cardDest}</Text>
@@ -150,14 +160,14 @@ export default function SummaryScreen() {
               <Text style={styles.infoLabelRight}>{cabinClass}</Text>
             </View>
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabelLeft}>ตู้ที่ {cabinNumber}</Text>
-              <Text style={styles.infoLabelRight} numberOfLines={1}>{formatSeatsWithType(String(selectedSeats))}</Text>
+              <Text style={styles.infoLabelLeft}>ตู้ที่ {cardCabin}</Text>
+              <Text style={styles.infoLabelRight} numberOfLines={1}>{formatSeatsWithType(String(cardSeats))}</Text>
             </View>
           </View>
           <View style={styles.divider} /> 
           <View style={styles.priceRow}>
-            <Text style={styles.totalText}>ยอดรวม</Text>
-            <Text style={styles.priceTextMain}>THB {price.toLocaleString('en-US')}</Text>
+            <Text style={styles.totalText}>รวม (เที่ยวนี้)</Text>
+            <Text style={styles.priceTextMain}>THB {cardPrice.toLocaleString('en-US')}</Text>
           </View>
       </View>
     );
@@ -177,8 +187,8 @@ export default function SummaryScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {renderTicketCard('go', finalPrice)}
-          {tripType === 'round-trip' && renderTicketCard('return', finalPrice)}
+          {renderTicketCard('go')}
+          {tripType === 'round-trip' && renderTicketCard('return')}
 
           <Text style={styles.paymentSectionTitle}>ช่องทางการชำระเงิน</Text>
           
@@ -224,7 +234,7 @@ export default function SummaryScreen() {
 
       <View style={styles.bottomFooter}>
         <View style={styles.footerPriceRow}>
-          <Text style={styles.footerLabel}>ยอดที่ต้องชำระ:</Text>
+          <Text style={styles.footerLabel}>ยอดสุทธิ {tripType === 'round-trip' ? '(ไป-กลับ)' : ''}:</Text>
           <Text style={styles.footerPriceValue}>THB {netPrice.toLocaleString('en-US')}</Text>
         </View>
         <TouchableOpacity style={[styles.confirmBtn, loading && {opacity: 0.7}]} onPress={handlePayment} disabled={loading}>
@@ -237,7 +247,6 @@ export default function SummaryScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 🔔 Modern Alert Modal */}
       <Modal visible={alertConfig.visible} transparent animationType="fade">
         <View style={styles.alertOverlay}>
           <View style={styles.alertBox}>
@@ -295,8 +304,6 @@ const styles = StyleSheet.create({
   footerPriceValue: { color: '#5E35B1', fontSize: 18, fontWeight: 'bold' },
   confirmBtn: { backgroundColor: '#3F51B5', flexDirection: 'row', paddingVertical: 15, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
   confirmBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-
-  // Styles สำหรับ Alert
   alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 30 },
   alertBox: { width: '100%', backgroundColor: '#FFF', borderRadius: 30, padding: 25, alignItems: 'center', elevation: 10 },
   alertIconBg: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 20, marginTop: -60, borderWidth: 5, borderColor: '#FFF' },
