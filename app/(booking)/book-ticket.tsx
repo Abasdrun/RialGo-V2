@@ -103,12 +103,18 @@ export default function BookTicketScreen() {
     return { bg: '#F5F5F5', color: '#757575', icon: 'train' }; 
   };
 
+  // 🛡️ แก้ไขตรงนี้: เพิ่มเคส ตะวันออก และ ตะวันตก
   const getStationStyle = (item: any) => {
     const region = item.region || ''; 
     if (region === 'ใต้') return { bg: '#FCE4EC', iconColor: '#E91E63', badgeText: 'สายใต้', badgeBg: '#E8F5E9', badgeTextColor: '#4CAF50' };
     if (region === 'เหนือ') return { bg: '#E0E0E0', iconColor: '#757575', badgeText: 'สายเหนือ', badgeBg: '#BDBDBD', badgeTextColor: '#333' };
     if (region === 'อีสาน') return { bg: '#EDE7F6', iconColor: '#5E35B1', badgeText: 'สายตะวันออกเฉียงเหนือ', badgeBg: '#D1C4E9', badgeTextColor: '#5E35B1' };
     if (region === 'กลาง') return { bg: '#FFF3E0', iconColor: '#FF9800', badgeText: 'สายกลาง', badgeBg: '#FFE0B2', badgeTextColor: '#FF9800' };
+    
+    // 🚩 เพิ่ม 2 ภาคนี้เพื่อให้ป้ายขึ้น
+    if (region === 'ตะวันออก') return { bg: '#FFF9C4', iconColor: '#FBC02D', badgeText: 'สายตะวันออก', badgeBg: '#FFFDE7', badgeTextColor: '#FBC02D' };
+    if (region === 'ตะวันตก') return { bg: '#FBE9E7', iconColor: '#FF5722', badgeText: 'สายตะวันตก', badgeBg: '#FFEBEE', badgeTextColor: '#FF5722' };
+    
     return { bg: '#D1C4E9', iconColor: '#5E35B1', badgeText: '', badgeBg: 'transparent', badgeTextColor: 'transparent' };
   };
 
@@ -217,12 +223,15 @@ export default function BookTicketScreen() {
     );
   };
 
+  // 🛡️ เพิ่ม สายตะวันออก/ตก ในตัวกรอง
   const regionFilters = [
     { id: 'ทั้งหมด', label: 'ทั้งหมด' },
     { id: 'กลาง', label: 'สายกลาง' },
     { id: 'เหนือ', label: 'สายเหนือ' },
     { id: 'อีสาน', label: 'สายตะวันออกเฉียงเหนือ' },
     { id: 'ใต้', label: 'สายใต้' },
+    { id: 'ตะวันออก', label: 'สายตะวันออก' },
+    { id: 'ตะวันตก', label: 'สายตะวันตก' },
   ];
 
   const filteredAllStations = stations.filter(s => {
@@ -405,9 +414,7 @@ export default function BookTicketScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ========================================================= */}
       {/* 🆕 Modern Alert Modal */}
-      {/* ========================================================= */}
       <Modal visible={alertConfig.visible} transparent animationType="fade">
         <View style={styles.alertOverlay}>
           <View style={styles.alertBox}>
@@ -425,10 +432,6 @@ export default function BookTicketScreen() {
           </View>
         </View>
       </Modal>
-
-      {/* ========================================================= */}
-      {/* 🔮 Other Modals */}
-      {/* ========================================================= */}
 
       <Modal visible={activeModal === 'station'} animationType="slide">
         <View style={styles.mainContainer}>
