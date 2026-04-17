@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router'; 
 import { supabase } from '../supabase';
 import * as ImagePicker from 'expo-image-picker'; 
+import { decode } from 'base64-arraybuffer'; // 📌 เพิ่มตัวนี้เพื่อแปลงไฟล์อัปโหลด
 
 const { width } = Dimensions.get('window');
 
@@ -16,7 +17,7 @@ export default function ProfileScreen() {
     
     const [profileImage, setProfileImage] = useState<string | null>(null);
     const [isEditModalVisible, setIsEditModalVisible] = useState(false);
-    const [isLogoutModalVisible, setIsLogoutModalVisible] = useState(false); // Modal ออกจากระบบ
+    const [isLogoutModalVisible, setIsLogoutModalVisible] = useState(false);
     const [editName, setEditName] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
 
@@ -29,22 +30,27 @@ export default function ProfileScreen() {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           setEmail(user.email || 'No Email');
-          const displayName = user.user_metadata?.full_name || 'Yoon';
+          
+          // 🚀 ดึงข้อมูลจากตาราง profiles โดยตรงจะชัวร์กว่า metadata
+          const { data: profileData } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+          
+          const displayName = profileData?.full_name || user.user_metadata?.full_name || 'Yoon';
           setName(displayName);
           setInitial(displayName.charAt(0).toUpperCase());
-          if (user.user_metadata?.avatar_url) {
+          
+          // ดึงรูปจากคอลัมน์ avatar_url ในฐานข้อมูล
+          if (profileData?.avatar_url) {
+              setProfileImage(profileData.avatar_url);
+          } else if (user.user_metadata?.avatar_url) {
               setProfileImage(user.user_metadata.avatar_url);
           }
-        } else {
-          setEmail('guest@railgo.com');
-          setName('Guest User');
-          setInitial('G');
         }
       } catch (error) {
         console.error(error);
       }
     };
 
+    // 📸 แก้ไขฟังก์ชันเลือกรูปให้บันทึกถาวร
     const pickImage = async () => {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
@@ -57,11 +63,42 @@ export default function ProfileScreen() {
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.5,
+        base64: true, // 📌 ต้องใช้ base64 เพื่ออัปโหลด
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const selectedImageUri = result.assets[0].uri;
-        setProfileImage(selectedImageUri);
+        try {
+          setIsUpdating(true);
+          const selectedImage = result.assets[0];
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+
+          // 1. อัปโหลดขึ้น Storage
+          const fileName = `${user.id}_avatar.jpg`;
+          const { error: uploadError } = await supabase.storage
+            .from('avatars')
+            .upload(`public/${fileName}`, decode(selectedImage.base64!), {
+              contentType: 'image/jpeg',
+              upsert: true
+            });
+
+          if (uploadError) throw uploadError;
+
+          // 2. ดึง Public URL มาบันทึก
+          const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(`public/${fileName}`);
+
+          // 3. บันทึกลงตาราง profiles และ Auth Metadata
+          await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id);
+          await supabase.auth.updateUser({ data: { avatar_url: publicUrl } });
+
+          setProfileImage(publicUrl);
+          Alert.alert('สำเร็จ', 'อัปเดตรูปโปรไฟล์เรียบร้อยแล้ว ✨');
+
+        } catch (error: any) {
+          Alert.alert('เกิดข้อผิดพลาด', error.message);
+        } finally {
+          setIsUpdating(false);
+        }
       }
     };
 
@@ -72,10 +109,17 @@ export default function ProfileScreen() {
       }
       setIsUpdating(true);
       try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
         const { error } = await supabase.auth.updateUser({
           data: { full_name: editName }
         });
         if (error) throw error;
+
+        // บันทึกลงตาราง profiles ด้วย
+        await supabase.from('profiles').update({ full_name: editName }).eq('id', user.id);
+
         setName(editName);
         setInitial(editName.charAt(0).toUpperCase());
         setIsEditModalVisible(false);
@@ -92,7 +136,6 @@ export default function ProfileScreen() {
       setIsEditModalVisible(true);
     };
 
-    // 🚀 ฟังก์ชัน Logout ใหม่
     const handleLogoutPress = () => {
       setIsLogoutModalVisible(true);
     };
@@ -130,7 +173,6 @@ export default function ProfileScreen() {
           </View>
 
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            {/* Profile Header Section */}
             <View style={styles.profileSection}>
               <View style={styles.avatarContainer}>
                 <View style={styles.avatarCircle}>
@@ -139,8 +181,10 @@ export default function ProfileScreen() {
                   ) : (
                     <Text style={styles.avatarText}>{initial}</Text>
                   )}
+                  {/* แสดง Loading ทับตอนอัปโหลด */}
+                  {isUpdating && <View style={styles.loadingOverlay}><ActivityIndicator color="#FFF" /></View>}
                 </View>
-                <TouchableOpacity style={styles.editBadge} onPress={pickImage}>
+                <TouchableOpacity style={styles.editBadge} onPress={pickImage} disabled={isUpdating}>
                   <Ionicons name="pencil" size={12} color="#FFF" />
                 </TouchableOpacity>
               </View>
@@ -152,7 +196,6 @@ export default function ProfileScreen() {
               </View>
             </View>
 
-            {/* Stats Card */}
             <View style={styles.statsCard}>
               <View style={styles.statCol}>
                 <Text style={[styles.statValue, {color: '#5E35B1'}]}>47</Text>
@@ -173,7 +216,6 @@ export default function ProfileScreen() {
               </View>
             </View>
 
-            {/* Membership Card */}
             <View style={styles.membershipCard}>
               <View style={styles.goldBadge}>
                 <Ionicons name="star" size={10} color="#FBC02D" />
@@ -196,7 +238,6 @@ export default function ProfileScreen() {
 
             <Text style={styles.menuSectionTitle}>บัญชีและระดับ</Text>
             
-            {/* Menu List */}
             <View style={styles.menuCard}>
               <TouchableOpacity style={styles.menuRow} onPress={openEditModal}>
                 <View style={[styles.menuIconBox, {backgroundColor: '#EBE4FF'}]}>
@@ -286,15 +327,13 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* 🚀 Edit Profile Modal */}
+        {/* 🚀 Edit Modal */}
         <Modal visible={isEditModalVisible} animationType="fade" transparent>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <View style={styles.editModalContainer}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>แก้ไขข้อมูลส่วนตัว</Text>
-                <TouchableOpacity onPress={() => setIsEditModalVisible(false)}>
-                  <Ionicons name="close" size={24} color="#757575" />
-                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setIsEditModalVisible(false)}><Ionicons name="close" size={24} color="#757575" /></TouchableOpacity>
               </View>
               <Text style={styles.inputLabel}>ชื่อ-นามสกุล</Text>
               <View style={styles.inputWrapper}>
@@ -313,22 +352,16 @@ export default function ProfileScreen() {
           </KeyboardAvoidingView>
         </Modal>
 
-        {/* 🚀 Modern Logout Modal */}
+        {/* 🚀 Logout Modal */}
         <Modal visible={isLogoutModalVisible} animationType="fade" transparent>
           <View style={styles.modalOverlay}>
             <View style={styles.logoutModalContainer}>
-              <View style={styles.logoutIconCircle}>
-                <Ionicons name="log-out" size={32} color="#F44336" />
-              </View>
+              <View style={styles.logoutIconCircle}><Ionicons name="log-out" size={32} color="#F44336" /></View>
               <Text style={styles.logoutTitle}>ออกจากระบบ</Text>
               <Text style={styles.logoutSubTitle}>คุณต้องการออกจากระบบใช่หรือไม่?{'\n'}เราจะคิดถึงคุณนะ!</Text>
               <View style={styles.logoutActionRow}>
-                <TouchableOpacity style={styles.cancelLogoutBtn} onPress={() => setIsLogoutModalVisible(false)}>
-                  <Text style={styles.cancelLogoutText}>ยกเลิก</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.confirmLogoutBtn} onPress={confirmLogout}>
-                  <Text style={styles.confirmLogoutText}>ออกจากระบบ</Text>
-                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelLogoutBtn} onPress={() => setIsLogoutModalVisible(false)}><Text style={styles.cancelLogoutText}>ยกเลิก</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.confirmLogoutBtn} onPress={confirmLogout}><Text style={styles.confirmLogoutText}>ออกจากระบบ</Text></TouchableOpacity>
               </View>
             </View>
           </View>
@@ -336,9 +369,9 @@ export default function ProfileScreen() {
 
       </View>
     );
-  }
+}
 
-  const styles = StyleSheet.create({
+const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F9F9F9' },
     safeArea: { flex: 1, zIndex: 1 },
     blueHeaderBg: { position: 'absolute', top: 0, left: 0, right: 0, height: 420, backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, overflow: 'hidden', zIndex: 0 },
@@ -353,6 +386,7 @@ export default function ProfileScreen() {
     avatarCircle: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#3F51B5', justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.2)', overflow: 'hidden' },
     avatarText: { fontSize: 40, color: '#FFF', fontWeight: 'bold' },
     avatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+    loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
     editBadge: { position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: '#262956', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#FFF' },
     userNameText: { fontSize: 18, fontWeight: 'bold', color: '#FFF', marginBottom: 5 },
     userEmailText: { fontSize: 12, color: '#A8AACC', marginBottom: 15 },
@@ -387,16 +421,12 @@ export default function ProfileScreen() {
     menuBadgeTextWhite: { fontSize: 10, color: '#5E35B1', fontWeight: 'bold' },
     menuBadgeYellow: { backgroundColor: '#FFF9C4', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginRight: 10, borderWidth: 1, borderColor: '#FBC02D' },
     menuBadgeTextYellow: { fontSize: 10, color: '#FBC02D', fontWeight: 'bold' },
-    
-    // Bottom Tab Bar
-    bottomTabBar: { position: 'absolute', bottom: 20, left: 20, right: 20, height: 70, backgroundColor: '#FFF', borderRadius: 35, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', elevation: 20, zIndex: 999, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.2, shadowRadius: 10 },
+    bottomTabBar: { position: 'absolute', bottom: 20, left: 20, right: 20, height: 70, backgroundColor: '#FFF', borderRadius: 35, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', elevation: 20, zIndex: 999 },
     tabItem: { alignItems: 'center', justifyContent: 'center', flex: 1, height: '100%' },
-    tabItemText: { fontSize: 10, color: '#757575', marginTop: 4, fontWeight: '500' },
+    tabItemText: { fontSize: 10, color: '#757575', marginTop: 4 },
     tabItemTextActive: { fontSize: 10, color: '#5E35B1', marginTop: 4, fontWeight: 'bold' },
-    
-    // Modal & Forms
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
-    editModalContainer: { width: '100%', backgroundColor: '#FFF', borderRadius: 25, padding: 25, elevation: 5 },
+    editModalContainer: { width: '100%', backgroundColor: '#FFF', borderRadius: 25, padding: 25 },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
     modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     inputLabel: { fontSize: 12, color: '#757575', marginBottom: 8, marginLeft: 5 },
@@ -404,9 +434,7 @@ export default function ProfileScreen() {
     textInput: { flex: 1, fontSize: 16, color: '#333' },
     saveBtn: { backgroundColor: '#5E35B1', height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginTop: 10 },
     saveBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-
-    // Logout Modal Styles
-    logoutModalContainer: { width: '85%', backgroundColor: '#FFF', borderRadius: 30, padding: 25, alignItems: 'center', elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 20 },
+    logoutModalContainer: { width: '85%', backgroundColor: '#FFF', borderRadius: 30, padding: 25, alignItems: 'center' },
     logoutIconCircle: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#FFEBEE', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
     logoutTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', marginBottom: 10 },
     logoutSubTitle: { fontSize: 14, color: '#757575', textAlign: 'center', lineHeight: 20, marginBottom: 25 },
@@ -415,4 +443,4 @@ export default function ProfileScreen() {
     cancelLogoutText: { fontSize: 15, fontWeight: '600', color: '#757575' },
     confirmLogoutBtn: { flex: 1, height: 50, borderRadius: 15, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F44336' },
     confirmLogoutText: { fontSize: 15, fontWeight: 'bold', color: '#FFF' },
-  });
+});
