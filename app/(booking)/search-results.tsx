@@ -13,9 +13,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { supabase } from "../../supabase";
 
+// ดึงขนาดความกว้างของหน้าจอเพื่อนำมาคำนวณหรือจัด Layout ในสัดส่วนที่เหมาะสม
 const { width } = Dimensions.get("window");
 
 export default function SearchResultsScreen() {
+  // รับพารามิเตอร์ที่ส่งต่อมาจากหน้าค้นหา (Search Screen) ผ่าน URL Parameters
   const params = useLocalSearchParams();
   const {
     origin,
@@ -32,46 +34,47 @@ export default function SearchResultsScreen() {
   } = params;
 
   // 🚀 LOGIC: เช็คว่าเป็นขาไปหรือขากลับ
+  // ถ้าเป็นขากลับ (isReturnLeg === "true") จะทำการสลับสถานีต้นทาง-ปลายทาง และใช้วันที่เดินทางกลับ
   const isReturn = isReturnLeg === "true";
   const currentOrigin = isReturn ? String(destination) : String(origin);
   const currentDest = isReturn ? String(origin) : String(destination);
   const currentDate = isReturn ? String(returnDate) : String(departureDate);
 
-  const [loading, setLoading] = useState(true);
-  const [distance, setDistance] = useState(0);
-  const [realSchedules, setRealSchedules] = useState<any[]>([]);
+  // การจัดการสถานะ (State) ภายใน Component
+  const [loading, setLoading] = useState(true); // สถานะการโหลดข้อมูล
+  const [distance, setDistance] = useState(0); // ระยะทางระหว่างสถานี (กม.)
+  const [realSchedules, setRealSchedules] = useState<any[]>([]); // รายการรอบรถที่กรองแล้ว
 
+  // คำนวณจำนวนที่นั่งทั้งหมดที่ต้องการจอง (ผู้ใหญ่ + เด็ก)
   const totalPax = Number(adults) + Number(children);
 
+  // เรียกฟังก์ชัน fetchSchedules เมื่อ Component ถูก Mount ครั้งแรก
   useEffect(() => {
     fetchSchedules();
   }, []);
 
+  /**
+   * ฟังก์ชันสำหรับแปลงวันที่ภาษาไทย (เช่น "1 มกราคม 2567") 
+   * ให้เป็นรูปแบบสากล (YYYY-MM-DD) เพื่อใช้ในการ Query ฐานข้อมูล Supabase
+   */
   const parseThaiDateToDB = (thaiDateStr: string) => {
     if (!thaiDateStr || thaiDateStr.includes("เลือก")) return null;
     const months = [
-      "มกราคม",
-      "กุมภาพันธ์",
-      "มีนาคม",
-      "เมษายน",
-      "พฤษภาคม",
-      "มิถุนายน",
-      "กรกฎาคม",
-      "สิงหาคม",
-      "กันยายน",
-      "ตุลาคม",
-      "พฤศจิกายน",
-      "ธันวาคม",
+      "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+      "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
     ];
     const parts = thaiDateStr.split(" ");
     if (parts.length !== 3) return null;
     const d = parts[0].padStart(2, "0");
     const m = (months.indexOf(parts[1]) + 1).toString().padStart(2, "0");
-    const y = parseInt(parts[2]) - 543;
+    const y = parseInt(parts[2]) - 543; // แปลง พ.ศ. เป็น ค.ศ.
     return `${y}-${m}-${d}`;
   };
 
-  // 🚀 ฟังก์ชันช่วยดึงความจุที่นั่งให้ตรงตาม Class
+  /**
+   * 🚀 ฟังก์ชันช่วยดึงความจุที่นั่งให้ตรงตาม Class
+   * กรณีที่ในฐานข้อมูลไม่มีค่า available_seats ระบุไว้ จะใช้ค่า Default ตามเงื่อนไขนี้
+   */
   const getCapacityFallback = (tType: string, cClass: string) => {
     if (tType === "รถด่วนพิเศษ") {
       if (cClass.includes("ชั้น 1")) return 24;
@@ -85,10 +88,14 @@ export default function SearchResultsScreen() {
     return 48;
   };
 
+  /**
+   * ฟังก์ชันหลักสำหรับดึงข้อมูลตารางเดินรถจาก Supabase
+   */
   const fetchSchedules = async () => {
     setLoading(true);
 
     try {
+      // 1. ดึงข้อมูล ID และตำแหน่งกิโลเมตร (km) ของสถานีต้นทางและปลายทาง
       const { data: stData } = await supabase
         .from("stations")
         .select("id, station_name, km")
@@ -111,22 +118,27 @@ export default function SearchResultsScreen() {
         }
       }
 
+      // หากไม่พบข้อมูลสถานีที่ระบุ ให้หยุดการทำงาน
       if (!originId || !destId) {
         setRealSchedules([]);
         setLoading(false);
         return;
       }
 
+      // 2. ดึงข้อมูลจุดจอด (train_stops) ของสถานีต้นทาง
       const { data: originStops } = await supabase
         .from("train_stops")
         .select("train_id, stop_order, departure_time")
         .eq("station_id", originId);
 
+      // 3. ดึงข้อมูลจุดจอด (train_stops) ของสถานีปลายทาง
       const { data: destStops } = await supabase
         .from("train_stops")
         .select("train_id, stop_order, arrival_time")
         .eq("station_id", destId);
 
+      // 4. กรองขบวนรถ (train_id) ที่วิ่งผ่านทั้งต้นทางและปลายทาง 
+      // และต้องมีลำดับจุดจอดต้นทาง (stop_order) ก่อนปลายทางเสมอ
       const validRoutes: any[] = [];
       if (originStops && destStops) {
         originStops.forEach((o) => {
@@ -155,6 +167,7 @@ export default function SearchResultsScreen() {
       const validTrainIds = validRoutes.map((r) => r.train_id);
       const dbDate = parseThaiDateToDB(currentDate);
 
+      // 5. ดึงข้อมูลเที่ยวรถ (trips) ที่เปิดให้บริการตามวันที่และประเภทรถที่ผู้ใช้เลือก
       const { data: tripData } = await supabase
         .from("trips")
         .select(
@@ -166,6 +179,7 @@ export default function SearchResultsScreen() {
         .eq("status", "Scheduled");
 
       if (tripData && tripData.length > 0) {
+        // 6. ประมวลผลข้อมูลแต่ละเที่ยว เพื่อเช็คจำนวนที่นั่งว่างที่แท้จริง
         const formattedTrips = await Promise.all(
           tripData.map(async (t: any) => {
             const routeInfo = validRoutes.find(
@@ -176,6 +190,7 @@ export default function SearchResultsScreen() {
               routeInfo?.arr_time ||
               getFallbackArrivalTime(exactDep, Math.abs(originKm - destKm));
 
+            // ตรวจสอบข้อมูลการจอง (bookings) เพื่อสรุปจำนวนที่นั่งที่ถูกจองไปแล้ว
             const { data: bookingsData } = await supabase
               .from("bookings")
               .select("selected_seats")
@@ -185,6 +200,7 @@ export default function SearchResultsScreen() {
             if (bookingsData) {
               bookingsData.forEach((b) => {
                 if (b.selected_seats) {
+                  // นับจำนวนที่นั่งจาก String ที่คั่นด้วยคอมม่า
                   bookedCount += b.selected_seats
                     .split(",")
                     .filter((s: string) => s.trim() !== "").length;
@@ -204,11 +220,12 @@ export default function SearchResultsScreen() {
               arr: exactArr,
               durationText: calculateRealDuration(exactDep, exactArr),
               remainingSeats,
-              isFull: remainingSeats < totalPax,
+              isFull: remainingSeats < totalPax, // ถ้าที่นั่งว่างไม่พอสำหรับจำนวนผู้โดยสาร ให้แสดงว่าเต็ม
             };
           }),
         );
 
+        // เรียงลำดับเที่ยวรถตามเวลาออกเดินทาง
         formattedTrips.sort((a, b) => a.dep.localeCompare(b.dep));
         setRealSchedules(formattedTrips);
       } else {
@@ -221,15 +238,21 @@ export default function SearchResultsScreen() {
     }
   };
 
+  /**
+   * คำนวณระยะเวลาเดินทาง (ชั่วโมง และ นาที) จากเวลาออกและเวลาถึง
+   */
   const calculateRealDuration = (dep: string, arr: string) => {
     if (!dep || !arr) return "--ชม. --น.";
     const [dh, dm] = dep.split(":").map(Number);
     const [ah, am] = arr.split(":").map(Number);
     let mins = ah * 60 + am - (dh * 60 + dm);
-    if (mins < 0) mins += 24 * 60;
+    if (mins < 0) mins += 24 * 60; // รองรับกรณีเดินทางข้ามคืน
     return `${Math.floor(mins / 60)}ชม. ${mins % 60}น.`;
   };
 
+  /**
+   * ฟังก์ชันคำนวณเวลาถึงโดยประมาณ หากในฐานข้อมูลไม่มีข้อมูลระบุไว้
+   */
   const getFallbackArrivalTime = (depTime: string, dist: number) => {
     const travelHours = dist / (trainType === "รถด่วนพิเศษ" ? 70 : 50);
     const [h, m] = depTime.split(":").map(Number);
@@ -245,6 +268,7 @@ export default function SearchResultsScreen() {
 
   return (
     <View style={styles.mainContainer}>
+      {/* ส่วนหัวของหน้าจอ (Header) ที่มีสีน้ำเงินและดีไซน์วงกลมกราฟิก */}
       <View style={styles.blueHeaderBg}>
         <View style={styles.headerGraphicCircle} />
         <SafeAreaView edges={["top"]} style={styles.headerSafeArea}>
@@ -261,6 +285,7 @@ export default function SearchResultsScreen() {
             <View style={{ width: 40 }} />
           </View>
 
+          {/* กล่องสรุปเส้นทาง (ต้นทาง -> ปลายทาง) พร้อมเวลาและระยะเวลาเดินทาง */}
           <View style={styles.routeSummaryBox}>
             <View style={styles.routeCol}>
               <Text style={styles.routeCity} numberOfLines={1}>
@@ -290,6 +315,7 @@ export default function SearchResultsScreen() {
         </SafeAreaView>
       </View>
 
+      {/* ส่วนแสดงเนื้อหา: ถ้ากำลังโหลดให้โชว์ Spinner ถ้าโหลดเสร็จให้โชว์รายการรอบรถ */}
       {loading ? (
         <ActivityIndicator
           size="large"
@@ -305,6 +331,7 @@ export default function SearchResultsScreen() {
             {currentDate} • {realSchedules.length} เที่ยว
           </Text>
 
+          {/* แสดงข้อความแจ้งเตือนหากไม่มีเที่ยวรถที่ค้นหา */}
           {realSchedules.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Ionicons name="train-outline" size={50} color="#E0E0E0" />
@@ -313,6 +340,7 @@ export default function SearchResultsScreen() {
               </Text>
             </View>
           ) : (
+            // วนลูปแสดง Card รายการเที่ยวรถที่ค้นพบ
             realSchedules.map((item) => (
               <View
                 key={item.id}
@@ -325,6 +353,7 @@ export default function SearchResultsScreen() {
                   <Text style={styles.trainInfoSub}>{cabinClass}</Text>
                 </View>
 
+                {/* ส่วนแสดงเวลาเดินทางขนาดใหญ่ */}
                 <View style={styles.timeRow}>
                   <View style={styles.timeSideBlock}>
                     <Text style={styles.timeHuge}>{item.dep}</Text>
@@ -345,6 +374,7 @@ export default function SearchResultsScreen() {
                   </View>
                 </View>
 
+                {/* ส่วนแสดงชื่อสถานีต้นทาง-ปลายทาง และระยะเวลา */}
                 <View style={styles.stationRow}>
                   <View style={styles.stationSideBlock}>
                     <Text style={styles.stationSmall} numberOfLines={1}>
@@ -370,6 +400,7 @@ export default function SearchResultsScreen() {
 
                 <View style={styles.dashedDivider} />
 
+                {/* ส่วนท้ายของ Card: บอกสถานะที่นั่งและปุ่มสำหรับกดเลือกเที่ยวรถ */}
                 <View style={styles.cardBottom}>
                   <View style={styles.statusGroup}>
                     {item.isFull ? (
@@ -427,6 +458,7 @@ export default function SearchResultsScreen() {
   );
 }
 
+// การกำหนดสไตล์ (Styles) สำหรับ Component ทั้งหมด
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: "#F9F9F9" },
   blueHeaderBg: {
