@@ -17,13 +17,12 @@ interface AlertConfig {
   onConfirm?: () => void;
 }
 
-// 🚀 [คืนค่าเดิม] ใช้ ID เดิมเป๊ะๆ รูปเก่าจะได้ไม่หาย แต่ลบช่องที่ 6 ออกเพราะหน้า Home มึงมีแค่ 2 กล่อง
 const FIXED_SLOTS = [
   { id: 'slider_1', name: 'สไลเดอร์ 1 (บนสุด)' },
   { id: 'slider_2', name: 'สไลเดอร์ 2 (ตรงกลาง)' },
   { id: 'slider_3', name: 'สไลเดอร์ 3 (ล่างสุด)' },
-  { id: 'grid_left_top', name: 'รูปกริด ซ้าย' }, // ใช้ ID เดิม
-  { id: 'grid_right', name: 'รูปกริด ขวา' },     // ใช้ ID เดิม
+  { id: 'grid_left_top', name: 'รูปโปสเตอร์ (ซ้าย)' },
+  { id: 'grid_right', name: 'รูปโปสเตอร์ (ขวา)' },
 ];
 
 export default function AdminBannersScreen() {
@@ -79,16 +78,16 @@ export default function AdminBannersScreen() {
     }
 
     let aspect: [number, number] = [16, 9];
-    // 🚀 [จุดที่แก้ให้] ถ้าอัปโหลดรูปกล่องด้านล่าง ระบบจะบังคับให้มึงครอบรูปเป็นจัตุรัส (1:1) อัตโนมัติ
+    // 🚀 [จุดที่แก้] บังคับตัดรูปเป็นแนวตั้ง (3:4) สำหรับช่องโปสเตอร์ด้านล่าง
     if (activeSlot?.id === 'grid_left_top' || activeSlot?.id === 'grid_right') {
-      aspect = [1, 1]; 
+      aspect = [3, 4]; 
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: aspect, 
-      quality: 0.8,
+      quality: 1.0,
       base64: true,
     });
 
@@ -266,7 +265,8 @@ export default function AdminBannersScreen() {
           <Ionicons name="warning-outline" size={20} color="#F57F17" style={{marginTop: 2}} />
           <View style={{marginLeft: 10, flex: 1}}>
             <Text style={styles.warningTitle}>หมายเหตุอัตราส่วนภาพ</Text>
-            <Text style={styles.warningDesc}>สไลเดอร์ (บนสุด) ตัดแบบ 16:9 / ส่วนกริด (ด้านล่าง) ตัดแบบ 1:1</Text>
+            <Text style={styles.warningDesc}>สไลเดอร์ระบบจะตัดแบบแนวนอน 16:9</Text>
+            <Text style={styles.warningDesc}>ส่วนโปสเตอร์ด้านล่าง ระบบจะตัดเป็นแนวตั้ง 3:4</Text>
           </View>
         </View>
 
@@ -323,8 +323,8 @@ export default function AdminBannersScreen() {
                 <TouchableOpacity onPress={closeModal}><Ionicons name="close" size={24} color="#333" /></TouchableOpacity>
               </View>
 
-              <Text style={styles.label}>ชื่อแบนเนอร์ / แคมเปญ</Text>
-              <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="เช่น โปรโมชั่นสงกรานต์" placeholderTextColor="#BDBDBD" />
+              <Text style={styles.label}>ชื่อแบนเนอร์ / โปสเตอร์</Text>
+              <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="เช่น โปสเตอร์โปรโมชั่น" placeholderTextColor="#BDBDBD" />
 
               <TouchableOpacity style={styles.uploadDropzone} onPress={pickImage}>
                 {previewImage ? (

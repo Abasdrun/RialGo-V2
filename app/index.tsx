@@ -181,7 +181,6 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* 🚀 [คืนค่าเดิม] ใช้ ID เดิมเป๊ะๆ รูปเก่าจะเด้งกลับมา และเพิ่ม resizeMode ให้รูปไม่แหว่ง */}
         <View style={styles.gridContainer}>
           <View style={styles.gridBox}>
             {bannerSlots['grid_left_top'] && <Image source={{ uri: bannerSlots['grid_left_top'] }} style={styles.gridImageFull} resizeMode="cover" />}
@@ -247,8 +246,8 @@ const styles = StyleSheet.create({
   menuText: { fontSize: 12, color: '#333', textAlign: 'center', fontWeight: '500' },
   
   gridContainer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20 },
-  // 🚀 [จุดที่แก้ให้] เอาความสูง 200 ออก แล้วยัดความยืดหยุ่น aspectRatio: 1 (จัตุรัส) เข้าไปแทน
-  gridBox: { width: '48%', aspectRatio: 1, borderRadius: 25, backgroundColor: '#FFF', overflow: 'hidden', borderWidth: 1, borderColor: '#E0E0E0', elevation: 1 },
+  // 🚀 [จุดที่แก้] เปลี่ยนจาก aspectRatio: 1 มาเป็น 3/4 เพื่อให้กล่องยืดลงมาเป็นทรงแนวตั้ง
+  gridBox: { width: '48%', aspectRatio: 3/4, borderRadius: 25, backgroundColor: '#FFF', overflow: 'hidden', borderWidth: 1, borderColor: '#E0E0E0', elevation: 1 },
   gridImageFull: { width: '100%', height: '100%' },
   
   bottomNavBar: { position: 'absolute', bottom: 20, left: 20, right: 20, height: 70, backgroundColor: '#FFF', borderRadius: 35, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingHorizontal: 10, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, borderWidth: 1, borderColor: '#F5F5F5' },
