@@ -18,13 +18,12 @@ interface PathStop {
 
 interface Ticket {
   id: string;
-  refCode: string;
   origin: string;
   dest: string;
   depTime: string;
   arrTime: string;
   duration: string;
-  date: string; // 🚀 เพิ่ม Date เข้ามาใน Interface
+  date: string; 
   originCoords: { latitude: number, longitude: number }; 
   destCoords: { latitude: number, longitude: number };
   pathStops: PathStop[]; 
@@ -83,7 +82,6 @@ export default function LocationScreen() {
     }
   };
 
-  // 🚀 ฟังก์ชันแปลงวันที่ให้เป็นภาษาไทยสวยๆ (เช่น 18 เม.ย. 2569)
   const formatThaiDate = (dateStr: string) => {
     if (!dateStr) return 'ไม่ระบุวันที่';
     const d = new Date(dateStr);
@@ -93,7 +91,6 @@ export default function LocationScreen() {
   };
 
   const calculateRealDuration = (dep: string, arr: string) => {
-    // 🚀 ดักจับเวลา 00:00 หรือ --:-- ให้แสดงเป็น --ชม. --น.
     if (!dep || !arr || dep.includes('-') || arr.includes('-') || dep === '00:00' || arr === '00:00') return '--ชม. --น.';
     const [dh, dm] = dep.split(':').map(Number);
     const [ah, am] = arr.split(':').map(Number);
@@ -137,7 +134,6 @@ export default function LocationScreen() {
 
         if (bookings && bookings.length > 0) {
           const formattedTickets = await Promise.all(bookings.map(async (b: any) => {
-            // 🚀 เปลี่ยน Default จาก 00:00 เป็น --:--
             let exactDep = '--:--'; 
             let exactArr = '--:--';
             let pathStops: PathStop[] = [];
@@ -154,7 +150,6 @@ export default function LocationScreen() {
                   const originStop = stops.find(s => s.station_id == b.origin_station_id);
                   const destStop = stops.find(s => s.station_id == b.destination_station_id);
                   
-                  // ดึงเวลาจริง ถ้าไม่มีให้เป็น --:--
                   if (originStop) exactDep = (originStop.departure_time || originStop.arrival_time || '--:--').substring(0, 5);
                   if (destStop) exactArr = (destStop.arrival_time || destStop.departure_time || '--:--').substring(0, 5);
 
@@ -162,7 +157,13 @@ export default function LocationScreen() {
                   const eIdx = stops.findIndex(s => s.station_id == b.destination_station_id);
                   
                   if (sIdx !== -1 && eIdx !== -1) {
-                    const rawPath = sIdx < eIdx ? stops.slice(sIdx, eIdx + 1) : stops.slice(eIdx, sIdx + 1);
+                    // 🚀 [แก้บั๊ก] เช็คลำดับ Array เผื่อรถไฟวิ่งสลับฝั่ง ต้อง .reverse() ให้เรียงถูกจากต้นทางไปปลายทาง
+                    let rawPath = [];
+                    if (sIdx <= eIdx) {
+                       rawPath = stops.slice(sIdx, eIdx + 1);
+                    } else {
+                       rawPath = stops.slice(eIdx, sIdx + 1).reverse(); 
+                    }
                     
                     pathStops = rawPath.map(s => ({
                         name: s.stations?.station_name || 'ไม่ระบุ',
@@ -189,12 +190,11 @@ export default function LocationScreen() {
 
             return {
               id: b.id.toString(),
-              refCode: `TH ${new Date(b.created_at).getFullYear()}-${String(b.id).padStart(5, '0')}`,
               origin: b.origin?.station_name || 'ไม่ระบุ',
               dest: b.dest?.station_name || 'ไม่ระบุ',
               depTime: exactDep, arrTime: exactArr,
               duration: calculateRealDuration(exactDep, exactArr),
-              date: b.trips?.departure_date || b.created_at, // 🚀 ดึงวันที่เดินทางมาใส่
+              date: b.trips?.departure_date || b.created_at,
               originCoords: { latitude: parseFloat(b.origin?.latitude) || 0, longitude: parseFloat(b.origin?.longitude) || 0 },
               destCoords: { latitude: parseFloat(b.dest?.latitude) || 0, longitude: parseFloat(b.dest?.longitude) || 0 },
               pathStops: pathStops,
@@ -273,7 +273,6 @@ export default function LocationScreen() {
       }
       
       const point = fullRoute[currentIndex];
-      
       const currentRemaining = Math.ceil(totalMins * ((totalPoints - 1 - currentIndex) / (totalPoints - 1)));
 
       setDemoState({
@@ -318,13 +317,12 @@ export default function LocationScreen() {
             {tickets.map((ticket, index) => (
               <View key={index} style={styles.locationCard}>
                 
-                {/* 🚀 เพิ่มแท็กวันที่เดินทางที่หัวมุมตั๋ว ให้มึงแยกตั๋วเก่า-ใหม่ได้ชัดเจน */}
+                {/* 🚀 ลบรหัส #TH ยาวๆ ออก เหลือแค่วันที่เดินทางให้ดูคลีนๆ */}
                 <View style={styles.cardHeaderRow}>
                   <View style={styles.dateBadge}>
                     <Ionicons name="calendar-outline" size={14} color="#5E35B1" />
                     <Text style={styles.dateBadgeText}>{formatThaiDate(ticket.date)}</Text>
                   </View>
-                  <Text style={styles.refText}>#{ticket.refCode}</Text>
                 </View>
 
                 <View style={styles.routeRow}>
@@ -509,11 +507,9 @@ const styles = StyleSheet.create({
   
   locationCard: { backgroundColor: '#FFF', borderRadius: 20, marginBottom: 15, elevation: 2, padding: 20, paddingBottom: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5 },
   
-  // 🚀 สไตล์ที่เพิ่มมาใหม่สำหรับป้ายวันที่
   cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   dateBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3E5F5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
   dateBadgeText: { color: '#5E35B1', fontSize: 12, fontWeight: 'bold', marginLeft: 5 },
-  refText: { color: '#9E9E9E', fontSize: 10 },
 
   routeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   cityText: { fontSize: 18, fontWeight: 'bold', color: '#333' },
