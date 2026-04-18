@@ -37,7 +37,7 @@ export default function MyTicketScreen() {
     fetchMyTickets();
   }, []);
 
-  // 🧮 ฟังก์ชันแยกเลขตู้ และเลขที่นั่ง (เช่น "1-12, 1-13" -> ตู้ 1, ที่นั่ง 12, 13)
+  // 🧮 ฟังก์ชันแยกเลขตู้ และเลขที่นั่ง
   const parseCabinAndSeats = (seatsStr: string) => {
     if (!seatsStr || seatsStr === 'undefined') return { cabin: '-', seats: '-' };
     const seatArr = seatsStr.split(',').map(s => s.trim());
@@ -48,7 +48,7 @@ export default function MyTicketScreen() {
 
   // 🧮 ฟังก์ชันคำนวณเวลาเดินทางจริง
   const calculateRealDuration = (dep: string, arr: string) => {
-    if (!dep || !arr || dep === '00:00') return '--ชม. --น.';
+    if (!dep || !arr || dep === '00:00' || arr === '00:00') return '--ชม. --น.';
     const [dh, dm] = dep.split(':').map(Number);
     const [ah, am] = arr.split(':').map(Number);
     let mins = (ah * 60 + am) - (dh * 60 + dm);
@@ -63,7 +63,7 @@ export default function MyTicketScreen() {
     const depDateTime = new Date(`${depDate}T${depTime}:00`);
     const diffMs = depDateTime.getTime() - now.getTime();
     
-    if (diffMs <= 0) return 'เดินทางแล้ว'; // ถ้ารถไฟออกไปแล้ว
+    if (diffMs <= 0) return 'เดินทางแล้ว';
     
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     const diffHrs = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
@@ -79,7 +79,6 @@ export default function MyTicketScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       
-      // ดึงข้อมูลจริงจาก DB
       if (user) {
         const { data: bookings } = await supabase
           .from('bookings')
@@ -94,34 +93,39 @@ export default function MyTicketScreen() {
 
         if (bookings && bookings.length > 0) {
           
-          // 🚀 [ระบบใหม่] วิ่งไปดึงเวลาออก/ถึง จาก train_stops แบบเรียลไทม์
           const formattedTickets = await Promise.all(bookings.map(async (b: any) => {
             
             let exactDep = '00:00';
             let exactArr = '00:00';
+
+            // 🚀 แก้ปัญหาโครงสร้าง trips
+            const tripData = Array.isArray(b.trips) ? b.trips[0] : b.trips;
             
-            if (b.trips?.train_id && b.origin_station_id && b.destination_station_id) {
+            if (tripData?.train_id && b.origin_station_id && b.destination_station_id) {
                const { data: stops } = await supabase.from('train_stops')
                   .select('station_id, departure_time, arrival_time')
-                  .eq('train_id', b.trips.train_id)
+                  .eq('train_id', tripData.train_id)
                   .in('station_id', [b.origin_station_id, b.destination_station_id]);
                
                if (stops) {
-                  const originStop = stops.find(s => s.station_id === b.origin_station_id);
-                  const destStop = stops.find(s => s.station_id === b.destination_station_id);
-                  if (originStop?.departure_time) exactDep = originStop.departure_time.substring(0, 5);
-                  if (destStop?.arrival_time) exactArr = destStop.arrival_time.substring(0, 5);
+                  // 🚀 แก้ปัญหา ID mismatch (ใช้ ==)
+                  const originStop = stops.find(s => s.station_id == b.origin_station_id);
+                  const destStop = stops.find(s => s.station_id == b.destination_station_id);
+                  
+                  // ดึงเวลาที่มีอยู่มาใช้ (เผื่อต้นทางไม่มี departure หรือปลายทางไม่มี arrival)
+                  if (originStop) {
+                    exactDep = (originStop.departure_time || originStop.arrival_time || '00:00').substring(0, 5);
+                  }
+                  if (destStop) {
+                    exactArr = (destStop.arrival_time || destStop.departure_time || '00:00').substring(0, 5);
+                  }
                }
             }
 
-            // แยกเลขตู้-ที่นั่ง
             const { cabin, seats } = parseCabinAndSeats(b.selected_seats);
-            
-            // คำนวณเวลา และ นับถอยหลัง
             const durationTxt = calculateRealDuration(exactDep, exactArr);
-            const countdownTxt = getCountdown(b.trips?.departure_date, exactDep);
+            const countdownTxt = getCountdown(tripData?.departure_date, exactDep);
 
-            // เช็คว่าเลยเวลาหรือยัง ถ้าเลยเวลาแล้วให้เปลี่ยนเป็น "เสร็จสิ้น" อัตโนมัติ
             let currentStatus = b.status === 'Confirmed' ? 'upcoming' : (b.status === 'Cancelled' ? 'cancelled' : 'completed');
             if (currentStatus === 'upcoming' && countdownTxt === 'เดินทางแล้ว') {
                 currentStatus = 'completed';
@@ -130,25 +134,24 @@ export default function MyTicketScreen() {
             return {
               id: b.id.toString(),
               refCode: `TH ${new Date(b.created_at).getFullYear()}-${String(b.id).padStart(5, '0')}`,
-              trainName: `${b.trips?.trains?.type || 'รถด่วนพิเศษ'} ${b.trips?.trains?.train_number || ''}`,
-              origin: b.origin?.station_name || 'กรุงเทพ',
-              dest: b.dest?.station_name || 'เชียงใหม่',
+              trainName: `${tripData?.trains?.type || 'รถด่วนพิเศษ'} ${tripData?.trains?.train_number || ''}`,
+              origin: b.origin?.station_name || 'ไม่ระบุ',
+              dest: b.dest?.station_name || 'ไม่ระบุ',
               depTime: exactDep,
               arrTime: exactArr,
               duration: durationTxt,
-              date: formatThaiDate(b.trips?.departure_date || new Date().toISOString()),
+              date: formatThaiDate(tripData?.departure_date || new Date().toISOString()),
               seat: seats,
               cabin: cabin, 
               price: b.total_price,
               status: currentStatus,
               countdown: countdownTxt,
-              classType: b.trips?.trains?.type === 'รถด่วนพิเศษ' ? 'ชั้น 2 ปรับอากาศ' : 'ชั้น 3 พัดลม'
+              classType: tripData?.trains?.type === 'รถด่วนพิเศษ' ? 'ชั้น 2 ปรับอากาศ' : 'ชั้น 3 พัดลม'
             };
           }));
 
           setTickets(formattedTickets);
         } else {
-           // ถ้าไม่มีข้อมูล ให้เซ็ตเป็นหน้าว่างๆ
            setTickets([]);
         }
       }
@@ -190,7 +193,6 @@ export default function MyTicketScreen() {
   return (
     <View style={styles.container}>
       
-      {/* 🌊 Header สีน้ำเงินเข้ม */}
       <View style={styles.blueHeaderBg}>
         <View style={styles.headerGraphicCircle} />
       </View>
@@ -204,7 +206,6 @@ export default function MyTicketScreen() {
           <View style={{width: 40}} />
         </View>
 
-        {/* 🔘 Tabs (ที่จะมาถึง / ประวัติการเดินทาง) */}
         <View style={styles.tabContainer}>
           <TouchableOpacity style={[styles.tabBtn, activeTab === 'upcoming' && styles.tabBtnActive]} onPress={() => setActiveTab('upcoming')}>
             <Text style={[styles.tabText, activeTab === 'upcoming' && styles.tabTextActive]}>ที่จะมาถึง</Text>
@@ -248,7 +249,6 @@ export default function MyTicketScreen() {
                   <Text style={styles.priceText}>THB {ticket.price.toLocaleString('en-US')}</Text>
                 </View>
 
-                {/* เส้นตกแต่งขอบซ้าย/ขวา */}
                 <View style={styles.cutoutLeft} />
                 <View style={styles.cutoutRight} />
               </TouchableOpacity>
@@ -264,13 +264,8 @@ export default function MyTicketScreen() {
         )}
       </SafeAreaView>
 
-      {/* ========================================== */}
-      {/* 🔮 MODAL: รายละเอียดตั๋ว (อัปเดตสไตล์ให้ตรงปก) */}
-      {/* ========================================== */}
       <Modal visible={!!selectedTicket} animationType="slide" transparent>
         <View style={styles.modalFullBg}>
-          
-          {/* 🌊 Header โค้งมนสีน้ำเงินเข้มใน Modal */}
           <View style={styles.modalBlueHeaderBg}>
              <View style={styles.headerGraphicCircle} />
           </View>
@@ -371,7 +366,6 @@ export default function MyTicketScreen() {
 
                 </View>
 
-                {/* 🟡 แถบเตือนเวลาสีเหลือง */}
                 {selectedTicket.status === 'upcoming' && (
                   <View style={styles.yellowWarningBanner}>
                     <Ionicons name="time-outline" size={24} color="#333" />
@@ -399,80 +393,59 @@ export default function MyTicketScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F5F5' },
   safeArea: { flex: 1, zIndex: 10 },
-  
   blueHeaderBg: { position: 'absolute', top: 0, left: 0, right: 0, height: 260, backgroundColor: '#2E3165', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, zIndex: 0 },
   headerGraphicCircle: { position: 'absolute', right: -50, top: -50, width: 300, height: 300, borderRadius: 150, backgroundColor: 'rgba(255,255,255,0.05)' },
-  
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10 },
   backBtnCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-
   tabContainer: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 30, marginHorizontal: 20, marginTop: 25, padding: 5 },
   tabBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 25 },
   tabBtnActive: { backgroundColor: '#FFF', elevation: 2 },
   tabText: { color: '#D1C4E9', fontWeight: 'bold', fontSize: 14 },
   tabTextActive: { color: '#262956' },
-
   scrollContent: { padding: 20, paddingTop: 20, paddingBottom: 50 },
-  
   ticketCard: { backgroundColor: '#FFF', borderRadius: 20, padding: 20, marginBottom: 15, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 5 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
   trainNameText: { fontSize: 14, fontWeight: 'bold', color: '#333' },
   dateText: { fontSize: 12, color: '#9E9E9E', marginTop: 2 },
   statusBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
   statusBadgeText: { fontSize: 10, fontWeight: 'bold' },
-
   routeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', borderStyle: 'dashed' },
   cityText: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   timeText: { fontSize: 12, color: '#9E9E9E', marginTop: 2 },
   arrowContainer: { alignItems: 'center', flex: 1 },
   durationText: { fontSize: 10, color: '#BDBDBD', marginBottom: 2 },
-
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 15 },
   seatBadge: { backgroundColor: '#EBE4FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
   seatBadgeText: { color: '#5E35B1', fontSize: 12, fontWeight: 'bold' },
   footerStatusBox: { flexDirection: 'row', alignItems: 'center' },
   footerStatusText: { fontSize: 12, fontWeight: 'bold' },
   priceText: { fontSize: 14, fontWeight: 'bold', color: '#333' },
-
   cutoutLeft: { position: 'absolute', top: 85, left: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: '#F5F5F5' },
   cutoutRight: { position: 'absolute', top: 85, right: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: '#F5F5F5' },
-
   emptyState: { alignItems: 'center', marginTop: 80 },
   emptyText: { color: '#9E9E9E', marginTop: 15, fontSize: 16 },
-
-  // ===================================
-  // 🔮 สไตล์ใหม่สำหรับ Modal ตามภาพเรฟเฟอเรนซ์
-  // ===================================
   modalFullBg: { flex: 1, backgroundColor: '#F5F5F5' }, 
   modalBlueHeaderBg: { position: 'absolute', top: 0, left: 0, right: 0, height: 280, backgroundColor: '#2E3165', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, zIndex: 0 },
-  
   modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 },
   modalHeaderTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 15 },
-  
   modalScroll: { paddingHorizontal: 20, paddingBottom: 50 },
-  
   modalTopInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 25 },
   confirmedBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(76, 175, 80, 0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 15, marginRight: 10, borderWidth: 1, borderColor: 'rgba(76, 175, 80, 0.5)' },
   confirmedText: { color: '#4CAF50', fontSize: 10, fontWeight: 'bold' },
   refText: { color: '#A8AACC', fontSize: 10, fontWeight: '500' },
-
   modalRouteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
   modalCityText: { fontSize: 22, fontWeight: 'bold', color: '#FFF' },
   modalCodeText: { fontSize: 11, color: '#A8AACC', marginTop: 4 },
   modalArrowCol: { alignItems: 'center' },
   modalDurationText: { fontSize: 10, color: '#A8AACC', marginTop: 5 },
-
   modalDarkCard: { backgroundColor: '#1E2046', borderRadius: 25, padding: 25, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 },
-  
   grid3Col: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   colItem: { flex: 1 },
   colCenter: { alignItems: 'center', borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#3A3C59', paddingHorizontal: 10 },
   colLabel: { fontSize: 11, color: '#A8AACC', marginBottom: 5 },
   colValue: { fontSize: 14, fontWeight: 'bold', color: '#FFF' },
-
   dividerDark: { height: 1, backgroundColor: '#3A3C59', marginVertical: 20 },
-
   timelineSection: { paddingLeft: 10 },
   timelineRow: { flexDirection: 'row', marginBottom: 0 },
   timelineTime: { color: '#FFF', fontSize: 14, fontWeight: 'bold', width: 45, marginTop: -2 },
@@ -485,13 +458,11 @@ const styles = StyleSheet.create({
   timelineSub: { color: '#A8AACC', fontSize: 12, marginBottom: 8 },
   travelTimeBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#262956', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15, alignSelf: 'flex-start' },
   travelTimeText: { color: '#A8AACC', fontSize: 10 },
-
   grid2x2: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   boxItem: { width: '48%', flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E2046', padding: 12, borderRadius: 20, marginBottom: 15, borderWidth: 1, borderColor: '#3A3C59' },
   boxIcon: { width: 36, height: 36, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   boxLabel: { fontSize: 10, color: '#A8AACC' },
   boxValue: { fontSize: 12, fontWeight: 'bold', color: '#FFF', marginTop: 2 },
-
   yellowWarningBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FDE047', paddingVertical: 20, paddingHorizontal: 20, borderRadius: 30, marginTop: 25, marginBottom: 20, elevation: 5, shadowColor: '#FBC02D', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 },
   warningLabel: { fontSize: 10, color: '#333' },
   warningTime: { fontSize: 16, fontWeight: 'bold', color: '#333', marginTop: 2 },
