@@ -1,5 +1,18 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Dimensions, Modal } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TextInput, 
+  TouchableOpacity, 
+  KeyboardAvoidingView, 
+  Platform, 
+  ScrollView, 
+  ActivityIndicator, 
+  Dimensions, 
+  Modal,
+  Image 
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -18,7 +31,6 @@ export default function SignupScreen() {
   const [loading, setLoading] = useState(false);
   const [agreed, setAgreed] = useState(false);
 
-  // 🚀 States สำหรับ Custom Modal แจ้งเตือนภาษาไทย
   const [modalVisible, setModalVisible] = useState(false);
   const [modalType, setModalType] = useState<'success' | 'error'>('error');
   const [modalTitle, setModalTitle] = useState('');
@@ -36,17 +48,14 @@ export default function SignupScreen() {
       showAlert('error', 'ข้อมูลไม่ครบถ้วน', 'กรุณากรอกข้อมูลในช่องที่ว่างให้ครบทุกช่อง');
       return;
     }
-    
     if (phone.length !== 10) {
       showAlert('error', 'เบอร์โทรไม่ถูกต้อง', 'กรุณาระบุเบอร์โทรศัพท์ให้ครบ 10 หลัก');
       return;
     }
-
     if (!agreed) {
       showAlert('error', 'ข้อกำหนดการใช้งาน', 'กรุณากดติ๊กยอมรับข้อกำหนดก่อนสมัครสมาชิก');
       return;
     }
-
     if (password !== confirmPassword) {
       showAlert('error', 'รหัสผ่านไม่ตรงกัน', 'รหัสผ่านและยืนยันรหัสผ่านต้องตรงกัน');
       return;
@@ -91,14 +100,16 @@ export default function SignupScreen() {
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false} bounces={false}>
         
-        {/* Header ส่วนบนพร้อมวงกลมกราฟิก */}
         <View style={styles.topBackground}>
           <View style={styles.graphicCircle1} />
           <View style={styles.graphicCircle2} />
           <SafeAreaView edges={['top']}>
             <View style={styles.logoContainer}>
-              <MaterialCommunityIcons name="train" size={60} color="#FFF" />
-              <Text style={styles.logoText}>RailGo</Text>
+              <Image 
+                source={require('../assets/images/logo.png')} 
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
             </View>
           </SafeAreaView>
         </View>
@@ -109,7 +120,6 @@ export default function SignupScreen() {
             <Text style={styles.pageSubtitle}>เริ่มต้นการเดินทางกับ RailGo</Text>
           </View>
 
-          {/* ฟิลด์กรอกข้อมูล Placeholder ภาษาไทย */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>ชื่อ-นามสกุล</Text>
             <View style={styles.inputWrapper}>
@@ -173,7 +183,6 @@ export default function SignupScreen() {
             <Text style={styles.termsText}>ฉันยอมรับ <Text style={styles.termsLink}>ข้อกำหนดการใช้งาน</Text> และ <Text style={styles.termsLink}>นโยบายความเป็นส่วนตัว</Text></Text>
           </TouchableOpacity>
 
-          {/* 🚀 ปุ่มที่แก้ไข: "สร้างบัญชี" */}
           <TouchableOpacity 
             style={[styles.primaryBtn, loading && {opacity: 0.7}]} 
             onPress={handleSignup} 
@@ -208,7 +217,6 @@ export default function SignupScreen() {
         </View>
       </ScrollView>
 
-      {/* Custom Alert Modal ภาษาไทย */}
       <Modal transparent visible={modalVisible} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -241,6 +249,8 @@ const styles = StyleSheet.create({
   graphicCircle1: { position: 'absolute', top: -40, right: -40, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.08)' },
   graphicCircle2: { position: 'absolute', bottom: -60, left: -50, width: 280, height: 280, borderRadius: 140, backgroundColor: 'rgba(255,255,255,0.04)' },
   logoContainer: { alignItems: 'center' },
+  // 🚀 ปรับขนาดรูปโลโก้ให้ใหญ่ขึ้น
+  logoImage: { width: 180, height: 120, marginBottom: -20 },
   logoText: { color: '#FFF', fontSize: 26, fontWeight: 'bold', marginTop: 10 },
   
   bottomCard: { minHeight: height * 0.75, backgroundColor: '#FFF', borderTopLeftRadius: 40, borderTopRightRadius: 40, padding: 25, marginTop: -40, paddingBottom: 50 },

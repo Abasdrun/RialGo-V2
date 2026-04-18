@@ -10,7 +10,8 @@ import {
   ScrollView, 
   ActivityIndicator, 
   Dimensions, 
-  Modal 
+  Modal,
+  Image 
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
@@ -39,7 +40,6 @@ export default function LoginScreen() {
       if (error) {
         setLoading(false); 
         let errorMessage = error.message;
-        // แปลข้อความ Error พื้นฐาน
         if (errorMessage.includes('Invalid login credentials')) {
           errorMessage = 'อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง';
         } else if (errorMessage.includes('Email not confirmed')) {
@@ -64,19 +64,20 @@ export default function LoginScreen() {
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false} bounces={false}>
         
-        {/* ส่วนหัวสีน้ำเงิน พร้อมกราฟิกวงกลม */}
         <View style={styles.topBackground}>
           <View style={styles.graphicCircle1} />
           <View style={styles.graphicCircle2} />
           <SafeAreaView edges={['top']}>
             <View style={styles.logoContainer}>
-              <MaterialCommunityIcons name="train" size={70} color="#FFF" />
-              <Text style={styles.logoText}>RailGo</Text>
+              <Image 
+                source={require('../assets/images/logo.png')} 
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
             </View>
           </SafeAreaView>
         </View>
 
-        {/* ส่วนฟอร์ม Login */}
         <View style={styles.bottomCard}>
           <View style={styles.headerTextGroup}>
              <Text style={styles.pageTitle}>เข้าสู่ระบบ</Text>
@@ -138,7 +139,6 @@ export default function LoginScreen() {
             {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>เข้าสู่ระบบ</Text>}
           </TouchableOpacity>
 
-          {/* 🚀 แก้ไขจุดนี้: เปลี่ยนจาก OR เป็น หรือ */}
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
             <Text style={styles.dividerText}>หรือ</Text>
@@ -165,7 +165,6 @@ export default function LoginScreen() {
         </View>
       </ScrollView>
 
-      {/* Modal Popup แจ้งเตือนภาษาไทย */}
       <Modal animationType="fade" transparent={true} visible={modalVisible}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -187,11 +186,12 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF' },
   scrollContainer: { flexGrow: 1 },
-  // แก้ไขส่วนหัวให้นิ่งและแสดงวงกลมครบ
   topBackground: { height: height * 0.32, backgroundColor: '#2E2D77', alignItems: 'center', justifyContent: 'center', position: 'relative' },
   graphicCircle1: { position: 'absolute', top: -30, right: -40, width: 230, height: 230, borderRadius: 115, backgroundColor: 'rgba(255,255,255,0.06)' },
   graphicCircle2: { position: 'absolute', bottom: -50, left: -60, width: 280, height: 280, borderRadius: 140, backgroundColor: 'rgba(255,255,255,0.04)' },
   logoContainer: { alignItems: 'center' },
+  // 🚀 ปรับขนาดรูปโลโก้ให้ใหญ่ขึ้น
+  logoImage: { width: 220, height: 150, marginBottom: -25 }, 
   logoText: { color: '#FFF', fontSize: 32, fontWeight: 'bold', marginTop: 5 },
   
   bottomCard: { flex: 1, backgroundColor: '#FFF', borderTopLeftRadius: 40, borderTopRightRadius: 40, paddingHorizontal: 25, paddingVertical: 30, marginTop: -40 },
