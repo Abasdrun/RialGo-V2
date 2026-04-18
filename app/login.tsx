@@ -25,7 +25,6 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMsg, setModalMsg] = useState('');
@@ -118,19 +117,6 @@ export default function LoginScreen() {
             </View>
           </View>
 
-          <View style={styles.optionsRow}>
-            <TouchableOpacity style={styles.checkboxRow} onPress={() => setRememberMe(!rememberMe)}>
-              <View style={[styles.checkbox, rememberMe && styles.checkboxActive]}>
-                {rememberMe && <Ionicons name="checkmark" size={12} color="#FFF" />}
-              </View>
-              <Text style={styles.rememberText}>จดจำรหัสผ่าน</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity>
-              <Text style={styles.forgotText}>ลืมรหัสผ่าน?</Text>
-            </TouchableOpacity>
-          </View>
-
           <TouchableOpacity 
             style={[styles.primaryBtn, (!isFormValid || loading) && {opacity: 0.8}]} 
             onPress={handleLogin} 
@@ -138,23 +124,6 @@ export default function LoginScreen() {
           >
             {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>เข้าสู่ระบบ</Text>}
           </TouchableOpacity>
-
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>หรือ</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <View style={styles.socialRow}>
-            <TouchableOpacity style={styles.socialBtn}>
-              <Ionicons name="logo-google" size={22} color="#DB4437" style={{marginRight: 8}} />
-              <Text style={styles.socialBtnText}>Google</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.socialBtn}>
-              <Ionicons name="logo-facebook" size={22} color="#1877F2" style={{marginRight: 8}} />
-              <Text style={styles.socialBtnText}>Facebook</Text>
-            </TouchableOpacity>
-          </View>
 
           <View style={styles.footerRow}>
             <Text style={styles.footerText}>ยังไม่มีบัญชีผู้ใช้? </Text>
@@ -190,9 +159,7 @@ const styles = StyleSheet.create({
   graphicCircle1: { position: 'absolute', top: -30, right: -40, width: 230, height: 230, borderRadius: 115, backgroundColor: 'rgba(255,255,255,0.06)' },
   graphicCircle2: { position: 'absolute', bottom: -50, left: -60, width: 280, height: 280, borderRadius: 140, backgroundColor: 'rgba(255,255,255,0.04)' },
   logoContainer: { alignItems: 'center' },
-  // 🚀 ปรับขนาดรูปโลโก้ให้ใหญ่ขึ้น
   logoImage: { width: 220, height: 150, marginBottom: -25 }, 
-  logoText: { color: '#FFF', fontSize: 32, fontWeight: 'bold', marginTop: 5 },
   
   bottomCard: { flex: 1, backgroundColor: '#FFF', borderTopLeftRadius: 40, borderTopRightRadius: 40, paddingHorizontal: 25, paddingVertical: 30, marginTop: -40 },
   headerTextGroup: { marginBottom: 25, borderBottomWidth: 1, borderBottomColor: '#F0F0F0', paddingBottom: 15 },
@@ -206,25 +173,10 @@ const styles = StyleSheet.create({
   input: { flex: 1, fontSize: 15, color: '#333' },
   eyeIcon: { padding: 5 },
   
-  optionsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 25, marginTop: 5 },
-  checkboxRow: { flexDirection: 'row', alignItems: 'center' },
-  checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: '#5D5BBF', justifyContent: 'center', alignItems: 'center', marginRight: 8 },
-  checkboxActive: { backgroundColor: '#5D5BBF' },
-  rememberText: { fontSize: 13, color: '#666' },
-  forgotText: { fontSize: 13, color: '#5D5BBF', fontWeight: 'bold' },
-  
-  primaryBtn: { backgroundColor: '#2E2D77', height: 55, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 25 },
+  primaryBtn: { backgroundColor: '#2E2D77', height: 55, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 30, marginTop: 20 },
   primaryBtnText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   
-  dividerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 25 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#EEE' },
-  dividerText: { marginHorizontal: 15, color: '#999', fontSize: 14, fontWeight: 'bold' },
-  
-  socialRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30 },
-  socialBtn: { flex: 0.48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: 26, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#EEE', elevation: 1 },
-  socialBtnText: { fontSize: 15, fontWeight: 'bold', color: '#444' },
-  
-  footerRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 20 },
+  footerRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 10 },
   footerText: { fontSize: 14, color: '#666' },
   footerLink: { fontSize: 14, color: '#5D5BBF', fontWeight: 'bold', textDecorationLine: 'underline' },
 
