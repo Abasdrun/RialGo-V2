@@ -7,7 +7,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from '../supabase';
 
-// 🟦 1. TypeScript Interface สำหรับ Modal แจ้งเตือน
 interface AlertConfig {
   visible: boolean;
   type: 'success' | 'warning' | 'error';
@@ -18,34 +17,30 @@ interface AlertConfig {
   onConfirm?: () => void;
 }
 
-// 📌 กำหนด 6 ช่องตายตัวของระบบ
+// 🚀 [คืนค่าเดิม] ใช้ ID เดิมเป๊ะๆ รูปเก่าจะได้ไม่หาย แต่ลบช่องที่ 6 ออกเพราะหน้า Home มึงมีแค่ 2 กล่อง
 const FIXED_SLOTS = [
   { id: 'slider_1', name: 'สไลเดอร์ 1 (บนสุด)' },
   { id: 'slider_2', name: 'สไลเดอร์ 2 (ตรงกลาง)' },
   { id: 'slider_3', name: 'สไลเดอร์ 3 (ล่างสุด)' },
-  { id: 'grid_left_top', name: 'รูปกริด ซ้าย-บน' },
-  { id: 'grid_left_bottom', name: 'รูปกริด ซ้าย-ล่าง' },
-  { id: 'grid_right', name: 'รูปกริด ขวา (แนวตั้ง)' },
+  { id: 'grid_left_top', name: 'รูปกริด ซ้าย' }, // ใช้ ID เดิม
+  { id: 'grid_right', name: 'รูปกริด ขวา' },     // ใช้ ID เดิม
 ];
 
 export default function AdminBannersScreen() {
   const [banners, setBanners] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // 🟢 States สำหรับ Modal อัปโหลด/แก้ไข
   const [isModalVisible, setModalVisible] = useState(false);
   const [activeSlot, setActiveSlot] = useState<any>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // ข้อมูลในฟอร์ม
   const [title, setTitle] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [base64Image, setBase64Image] = useState<string | null>(null);
 
-  // 🟦 2. State สำหรับ Modern Alert Modal
   const [alertConfig, setAlertConfig] = useState<AlertConfig>({
     visible: false,
     type: 'warning',
@@ -68,7 +63,6 @@ export default function AdminBannersScreen() {
     setLoading(false);
   };
 
-  // ฟังก์ชันเรียก Alert
   const showAlert = (config: Omit<AlertConfig, 'visible'>) => {
     setAlertConfig({ ...config, visible: true });
   };
@@ -77,7 +71,6 @@ export default function AdminBannersScreen() {
     setAlertConfig(prev => ({ ...prev, visible: false }));
   };
 
-  // 📸 เลือกรูป
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -86,8 +79,10 @@ export default function AdminBannersScreen() {
     }
 
     let aspect: [number, number] = [16, 9];
-    if (activeSlot?.id === 'grid_left_bottom') aspect = [16, 8];
-    if (activeSlot?.id === 'grid_right') aspect = [9, 16];
+    // 🚀 [จุดที่แก้ให้] ถ้าอัปโหลดรูปกล่องด้านล่าง ระบบจะบังคับให้มึงครอบรูปเป็นจัตุรัส (1:1) อัตโนมัติ
+    if (activeSlot?.id === 'grid_left_top' || activeSlot?.id === 'grid_right') {
+      aspect = [1, 1]; 
+    }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -103,7 +98,6 @@ export default function AdminBannersScreen() {
     }
   };
 
-  // 💾 บันทึกข้อมูล
   const handleSaveBanner = async () => {
     if (!title) {
       showAlert({ type: 'warning', title: 'ข้อมูลไม่ครบ', message: 'กรุณากรอกชื่อแบนเนอร์' });
@@ -192,7 +186,6 @@ export default function AdminBannersScreen() {
     setPreviewImage(null); setBase64Image(null);
   };
 
-  // 🗑️ ลบรูป (เปลี่ยนจาก Alert.alert เป็น Modern Alert)
   const handleDelete = (id: number, slotName: string) => {
     showAlert({
       type: 'warning',
@@ -208,7 +201,6 @@ export default function AdminBannersScreen() {
     });
   };
 
-  // 📝 เรนเดอร์การ์ด
   const renderSlotCard = (slotDef: any) => {
     const existingData = banners.find(b => b.slot_name === slotDef.id);
 
@@ -264,7 +256,7 @@ export default function AdminBannersScreen() {
           </TouchableOpacity>
           <View style={{flex: 1, marginLeft: 15}}>
             <Text style={styles.headerTitle}>จัดการแบนเนอร์</Text>
-            <Text style={styles.headerSub}>เปลี่ยนรูปข่าวสารบนหน้า Home (ระบบ 6 ช่อง)</Text>
+            <Text style={styles.headerSub}>เปลี่ยนรูปข่าวสารบนหน้า Home (ระบบ 5 ช่อง)</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -273,9 +265,8 @@ export default function AdminBannersScreen() {
         <View style={styles.warningBox}>
           <Ionicons name="warning-outline" size={20} color="#F57F17" style={{marginTop: 2}} />
           <View style={{marginLeft: 10, flex: 1}}>
-            <Text style={styles.warningTitle}>หมายเหตุ</Text>
-            <Text style={styles.warningDesc}>ระบบล็อกไว้ที่ 6 ตำแหน่ง หากลบจะเป็นการเคลียร์ช่องนั้นให้ว่าง</Text>
-            <Text style={styles.warningDesc}>สัดส่วน 16:9 สำหรับสไลเดอร์ / 16:8 กริดซ้ายล่าง / 9:16 กริดขวา</Text>
+            <Text style={styles.warningTitle}>หมายเหตุอัตราส่วนภาพ</Text>
+            <Text style={styles.warningDesc}>สไลเดอร์ (บนสุด) ตัดแบบ 16:9 / ส่วนกริด (ด้านล่าง) ตัดแบบ 1:1</Text>
           </View>
         </View>
 
@@ -288,7 +279,6 @@ export default function AdminBannersScreen() {
         )}
       </ScrollView>
 
-      {/* 🟦 Modern Alert Modal (เพิ่มใหม่) */}
       <Modal animationType="fade" transparent visible={alertConfig.visible}>
         <View style={styles.alertOverlay}>
           <View style={styles.alertContainer}>
@@ -321,7 +311,6 @@ export default function AdminBannersScreen() {
         </View>
       </Modal>
 
-      {/* 🟦 Input Form Modal */}
       <Modal visible={isModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -344,7 +333,7 @@ export default function AdminBannersScreen() {
                   <View style={{alignItems: 'center'}}>
                     <Ionicons name="image-outline" size={40} color="#BDBDBD" />
                     <Text style={styles.dropzoneTitle}>คลิกเพื่อเลือกรูปภาพ</Text>
-                    <Text style={styles.dropzoneSub}>PNG, JPG, WebP - ไม่เกิน 2MB</Text>
+                    <Text style={styles.dropzoneSub}>ระบบจะบังคับให้ตัดภาพอัตโนมัติ</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -413,8 +402,6 @@ const styles = StyleSheet.create({
   editBtnText: { color: '#757575', fontSize: 10, fontWeight: 'bold' },
   deleteBtn: { flex: 1, backgroundColor: '#FFEBEE', paddingVertical: 6, borderRadius: 8, alignItems: 'center' },
   deleteBtnText: { color: '#F44336', fontSize: 10, fontWeight: 'bold' },
-
-  // Modern Alert Modal
   alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 30 },
   alertContainer: { width: '100%', backgroundColor: '#FFF', borderRadius: 25, padding: 25, alignItems: 'center', elevation: 10 },
   alertIconCircle: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
@@ -425,8 +412,6 @@ const styles = StyleSheet.create({
   alertCancelText: { color: '#757575', fontWeight: 'bold' },
   alertConfirmBtn: { paddingVertical: 14, borderRadius: 15, backgroundColor: '#5E35B1', justifyContent: 'center', alignItems: 'center', minWidth: 120 },
   alertConfirmText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-
-  // Input Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },

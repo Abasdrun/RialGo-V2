@@ -13,7 +13,6 @@ export default function HomeScreen() {
   const [fullName, setFullName] = useState('');
   const [bannerSlots, setBannerSlots] = useState<Record<string, string>>({});
 
-  // 🔍 State สำหรับการค้นหาและ Modal
   const [searchText, setSearchText] = useState('');
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [modalMsg, setModalMsg] = useState('');
@@ -55,7 +54,6 @@ export default function HomeScreen() {
     if (slide !== activeSlide) setActiveSlide(slide);
   };
 
-  // 🚀 Logic ค้นหาและเปิด Modal ดีไซน์ใหม่
   const handleSearchSubmit = () => {
     const text = searchText.toLowerCase().trim();
     if (text === '') return;
@@ -80,7 +78,6 @@ export default function HomeScreen() {
   return (
     <View style={styles.mainContainer}>
       
-      {/* 🔔 Modern Custom Popup (ดีไซน์ตามภาพใหม่) */}
       <Modal
         transparent={true}
         visible={isModalVisible}
@@ -89,22 +86,15 @@ export default function HomeScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            
-            {/* Icon วงกลมด้านบน */}
             <View style={styles.modalIconContainer}>
               <View style={styles.modalIconCircle}>
                 <Ionicons name="search" size={40} color="#FF5252" />
               </View>
             </View>
-
             <Text style={styles.modalTitle}>ค้นหาไม่สำเร็จ</Text>
             <Text style={styles.modalSubText}>{modalMsg}</Text>
-
             <View style={styles.modalButtonWrapper}>
-              <TouchableOpacity 
-                style={styles.modalPrimaryBtn} 
-                onPress={() => setIsModalVisible(false)}
-              >
+              <TouchableOpacity style={styles.modalPrimaryBtn} onPress={() => setIsModalVisible(false)}>
                 <Text style={styles.modalPrimaryBtnText}>ตกลง</Text>
               </TouchableOpacity>
             </View>
@@ -114,7 +104,6 @@ export default function HomeScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         
-        {/* 🌊 Header สีน้ำเงินเข้ม */}
         <View style={styles.blueHeaderBg}>
           <View style={styles.headerGraphicCircle} />
           
@@ -126,10 +115,7 @@ export default function HomeScreen() {
               </View>
 
               {userRole === 'admin' && (
-                <TouchableOpacity 
-                  style={styles.adminShieldBtn} 
-                  onPress={() => router.push('/admin')}
-                >
+                <TouchableOpacity style={styles.adminShieldBtn} onPress={() => router.push('/admin')}>
                   <MaterialCommunityIcons name="shield-check" size={28} color="#FFD700" />
                   <View style={styles.adminStatusDot} />
                 </TouchableOpacity>
@@ -151,7 +137,6 @@ export default function HomeScreen() {
           </SafeAreaView>
         </View>
 
-        {/* 📰 แบนเนอร์สไลเดอร์ */}
         <View style={styles.bannerWrapper}>
           <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={16}>
             {sliderSlots.map((slot, index) => (
@@ -166,7 +151,6 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* 🎛️ เมนูด่วน */}
         <View style={styles.quickMenuSection}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>เมนูด่วน</Text>
@@ -197,18 +181,17 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* 🖼️ Grid รูปภาพ */}
+        {/* 🚀 [คืนค่าเดิม] ใช้ ID เดิมเป๊ะๆ รูปเก่าจะเด้งกลับมา และเพิ่ม resizeMode ให้รูปไม่แหว่ง */}
         <View style={styles.gridContainer}>
           <View style={styles.gridBox}>
-            {bannerSlots['grid_left_top'] && <Image source={{ uri: bannerSlots['grid_left_top'] }} style={styles.gridImageFull} />}
+            {bannerSlots['grid_left_top'] && <Image source={{ uri: bannerSlots['grid_left_top'] }} style={styles.gridImageFull} resizeMode="cover" />}
           </View>
           <View style={styles.gridBox}>
-            {bannerSlots['grid_right'] && <Image source={{ uri: bannerSlots['grid_right'] }} style={styles.gridImageFull} />}
+            {bannerSlots['grid_right'] && <Image source={{ uri: bannerSlots['grid_right'] }} style={styles.gridImageFull} resizeMode="cover" />}
           </View>
         </View>
       </ScrollView>
 
-      {/* 📲 Bottom Navigation Bar */}
       <View style={styles.bottomNavBar}>
         <TouchableOpacity style={styles.navItem}><Ionicons name="home" size={24} color="#5E35B1" /><Text style={[styles.navText, { color: '#5E35B1' }]}>Home</Text></TouchableOpacity>
         <TouchableOpacity style={styles.navItem} onPress={() => router.push('/location')}><Ionicons name="location-outline" size={24} color="#333" /><Text style={styles.navText}>Location</Text></TouchableOpacity>
@@ -223,109 +206,37 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F9F9F9' },
   scrollContent: { paddingBottom: 110 }, 
-  
-  // 🔔 Styles สำหรับ Modern Modal (ดีไซน์ตามภาพ a9e82a)
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center'
-  },
-  modalContent: {
-    width: width * 0.82,
-    backgroundColor: '#FFF',
-    borderRadius: 35,
-    padding: 25,
-    alignItems: 'center',
-    elevation: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
-  },
-  modalIconContainer: {
-    marginBottom: 20,
-  },
-  modalIconCircle: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: '#FFEBEE', // สีชมพูอ่อนๆ
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-  },
-  modalSubText: {
-    fontSize: 15,
-    color: '#777',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 30,
-    paddingHorizontal: 10,
-  },
-  modalButtonWrapper: {
-    width: '100%',
-  },
-  modalPrimaryBtn: {
-    backgroundColor: '#FF5252', // สีแดงส้มตามภาพ
-    paddingVertical: 16,
-    borderRadius: 20,
-    alignItems: 'center',
-    shadowColor: '#FF5252',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  modalPrimaryBtnText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFF',
-  },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { width: width * 0.82, backgroundColor: '#FFF', borderRadius: 35, padding: 25, alignItems: 'center', elevation: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 15 },
+  modalIconContainer: { marginBottom: 20 },
+  modalIconCircle: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#FFEBEE', justifyContent: 'center', alignItems: 'center' },
+  modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#333', marginBottom: 10 },
+  modalSubText: { fontSize: 15, color: '#777', textAlign: 'center', lineHeight: 22, marginBottom: 30, paddingHorizontal: 10 },
+  modalButtonWrapper: { width: '100%' },
+  modalPrimaryBtn: { backgroundColor: '#FF5252', paddingVertical: 16, borderRadius: 20, alignItems: 'center', shadowColor: '#FF5252', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 5 },
+  modalPrimaryBtnText: { fontSize: 18, fontWeight: 'bold', color: '#FFF' },
 
-  blueHeaderBg: { 
-    backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, 
-    paddingBottom: 90, position: 'relative', overflow: 'hidden'
-  },
-  headerGraphicCircle: {
-    position: 'absolute', right: -50, top: -50, width: 300, height: 300, borderRadius: 150, backgroundColor: '#2E3166',
-  },
+  blueHeaderBg: { backgroundColor: '#262956', borderBottomLeftRadius: 40, borderBottomRightRadius: 40, paddingBottom: 90, position: 'relative', overflow: 'hidden' },
+  headerGraphicCircle: { position: 'absolute', right: -50, top: -50, width: 300, height: 300, borderRadius: 150, backgroundColor: '#2E3166' },
   headerSafeArea: { paddingHorizontal: 25, paddingTop: 10 },
   headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   greetingContainer: { flex: 1 },
   greetingSub: { fontSize: 14, color: '#D1C4E9', marginBottom: 2 },
   greetingName: { fontSize: 22, fontWeight: 'bold', color: '#FFF' },
-  adminShieldBtn: { 
-    width: 48, height: 48, borderRadius: 16, backgroundColor: 'rgba(255, 255, 255, 0.12)', 
-    justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255, 215, 0, 0.35)', 
-    elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4,
-  },
-  adminStatusDot: { 
-    position: 'absolute', bottom: -1, right: -1, width: 12, height: 12, borderRadius: 6, 
-    backgroundColor: '#4CAF50', borderWidth: 2, borderColor: '#262956'
-  },
-  searchBox: { 
-    flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.12)', 
-    borderRadius: 20, paddingHorizontal: 15, height: 45, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)'
-  },
+  adminShieldBtn: { width: 48, height: 48, borderRadius: 16, backgroundColor: 'rgba(255, 255, 255, 0.12)', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255, 215, 0, 0.35)', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4 },
+  adminStatusDot: { position: 'absolute', bottom: -1, right: -1, width: 12, height: 12, borderRadius: 6, backgroundColor: '#4CAF50', borderWidth: 2, borderColor: '#262956' },
+  searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.12)', borderRadius: 20, paddingHorizontal: 15, height: 45, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)' },
   searchInput: { flex: 1, marginHorizontal: 10, fontSize: 14, color: '#FFF' },
-  bannerWrapper: { 
-    marginTop: -60, marginHorizontal: 20, height: 220, borderRadius: 25, 
-    backgroundColor: '#FFF', overflow: 'hidden', marginBottom: 30, elevation: 4, 
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 5, borderWidth: 1, borderColor: '#EEEEEE'
-  },
+  
+  bannerWrapper: { marginTop: -60, marginHorizontal: 20, height: 220, borderRadius: 25, backgroundColor: '#FFF', overflow: 'hidden', marginBottom: 30, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 5, borderWidth: 1, borderColor: '#EEEEEE' },
   bannerSlide: { width: width - 40, height: 220 },
-  bannerImage: { width: '100%', height: '100%' },
+  bannerImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   bannerPlaceholder: { width: '100%', height: '100%', backgroundColor: '#FAFAFA', justifyContent: 'center', alignItems: 'center' },
   placeholderText: { fontSize: 24, color: '#E0E0E0', fontWeight: 'bold' },
   paginationDots: { position: 'absolute', bottom: 15, alignSelf: 'center', flexDirection: 'row' },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#E0E0E0', marginHorizontal: 4 },
   activeDot: { backgroundColor: '#BDBDBD' },
+  
   quickMenuSection: { paddingHorizontal: 25, marginBottom: 30 },
   sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginRight: 15 },
@@ -334,15 +245,13 @@ const styles = StyleSheet.create({
   menuItem: { alignItems: 'center', width: '30%' },
   menuIconSquare: { width: 65, height: 65, borderRadius: 15, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   menuText: { fontSize: 12, color: '#333', textAlign: 'center', fontWeight: '500' },
+  
   gridContainer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20 },
-  gridBox: { width: '48%', height: 200, borderRadius: 25, backgroundColor: '#FFF', overflow: 'hidden', borderWidth: 1, borderColor: '#E0E0E0', elevation: 1 },
+  // 🚀 [จุดที่แก้ให้] เอาความสูง 200 ออก แล้วยัดความยืดหยุ่น aspectRatio: 1 (จัตุรัส) เข้าไปแทน
+  gridBox: { width: '48%', aspectRatio: 1, borderRadius: 25, backgroundColor: '#FFF', overflow: 'hidden', borderWidth: 1, borderColor: '#E0E0E0', elevation: 1 },
   gridImageFull: { width: '100%', height: '100%' },
-  bottomNavBar: { 
-    position: 'absolute', bottom: 20, left: 20, right: 20, height: 70, backgroundColor: '#FFF', 
-    borderRadius: 35, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', 
-    paddingHorizontal: 10, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, 
-    shadowOpacity: 0.1, shadowRadius: 10, borderWidth: 1, borderColor: '#F5F5F5' 
-  },
+  
+  bottomNavBar: { position: 'absolute', bottom: 20, left: 20, right: 20, height: 70, backgroundColor: '#FFF', borderRadius: 35, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingHorizontal: 10, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, borderWidth: 1, borderColor: '#F5F5F5' },
   navItem: { alignItems: 'center', justifyContent: 'center' },
   navText: { fontSize: 10, fontWeight: 'bold', color: '#333', marginTop: 4 },
 });
