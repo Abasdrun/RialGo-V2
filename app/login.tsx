@@ -71,7 +71,7 @@ export default function LoginScreen() {
             <View style={styles.logoContainer}>
               {/* 🚀 อัปเดตเป็นชื่อโลโก้ใหม่ logo_new.png เรียบร้อยครับ */}
               <Image 
-                source={require('../assets/images/logo3.png')} 
+                source={require('../assets/images/logo_new.png')} 
                 style={styles.logoImage}
                 resizeMode="contain"
               />

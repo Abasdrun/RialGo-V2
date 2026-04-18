@@ -191,23 +191,6 @@ export default function SignupScreen() {
             {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>สร้างบัญชี</Text>}
           </TouchableOpacity>
 
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>หรือ</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <View style={styles.socialRow}>
-            <TouchableOpacity style={styles.socialBtn}>
-              <Ionicons name="logo-google" size={18} color="#DB4437" style={{marginRight: 8}} />
-              <Text style={styles.socialBtnText}>Google</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.socialBtn}>
-              <Ionicons name="logo-facebook" size={18} color="#1877F2" style={{marginRight: 8}} />
-              <Text style={styles.socialBtnText}>Facebook</Text>
-            </TouchableOpacity>
-          </View>
-
           <View style={styles.footerRow}>
             <Text style={styles.footerText}>มีบัญชีผู้ใช้อยู่แล้ว? </Text>
             <TouchableOpacity onPress={() => router.push('/login')}>
@@ -249,9 +232,7 @@ const styles = StyleSheet.create({
   graphicCircle1: { position: 'absolute', top: -40, right: -40, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.08)' },
   graphicCircle2: { position: 'absolute', bottom: -60, left: -50, width: 280, height: 280, borderRadius: 140, backgroundColor: 'rgba(255,255,255,0.04)' },
   logoContainer: { alignItems: 'center' },
-  // 🚀 ปรับขนาดรูปโลโก้ให้ใหญ่ขึ้น
   logoImage: { width: 180, height: 120, marginBottom: -20 },
-  logoText: { color: '#FFF', fontSize: 26, fontWeight: 'bold', marginTop: 10 },
   
   bottomCard: { minHeight: height * 0.75, backgroundColor: '#FFF', borderTopLeftRadius: 40, borderTopRightRadius: 40, padding: 25, marginTop: -40, paddingBottom: 50 },
   headerTitleRow: { marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#F0F0F0', paddingBottom: 10 },
@@ -277,17 +258,9 @@ const styles = StyleSheet.create({
   termsText: { flex: 1, fontSize: 10, color: '#757575', lineHeight: 15 },
   termsLink: { color: '#5D5BBF', fontWeight: 'bold' },
   
-  primaryBtn: { backgroundColor: '#2E2D77', height: 55, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 20, marginTop: 10 },
+  primaryBtn: { backgroundColor: '#2E2D77', height: 55, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 30, marginTop: 10 },
   primaryBtnText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
 
-  dividerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#EEE' },
-  dividerText: { marginHorizontal: 15, color: '#999', fontSize: 12 },
-  
-  socialRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  socialBtn: { flex: 0.48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 50, borderWidth: 1, borderColor: '#DDD', borderRadius: 25 },
-  socialBtnText: { fontSize: 14, fontWeight: 'bold', color: '#333' },
-  
   footerRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingBottom: 20 },
   footerText: { fontSize: 13, color: '#757575' },
   footerLink: { fontSize: 13, color: '#5D5BBF', fontWeight: 'bold', textDecorationLine: 'underline' },
