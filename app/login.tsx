@@ -69,8 +69,9 @@ export default function LoginScreen() {
           <View style={styles.graphicCircle2} />
           <SafeAreaView edges={['top']}>
             <View style={styles.logoContainer}>
+              {/* 🚀 อัปเดตเป็นชื่อโลโก้ใหม่ logo_new.png เรียบร้อยครับ */}
               <Image 
-                source={require('../assets/images/logo.png')} 
+                source={require('../assets/images/logo3.png')} 
                 style={styles.logoImage}
                 resizeMode="contain"
               />
@@ -190,8 +191,8 @@ const styles = StyleSheet.create({
   graphicCircle1: { position: 'absolute', top: -30, right: -40, width: 230, height: 230, borderRadius: 115, backgroundColor: 'rgba(255,255,255,0.06)' },
   graphicCircle2: { position: 'absolute', bottom: -50, left: -60, width: 280, height: 280, borderRadius: 140, backgroundColor: 'rgba(255,255,255,0.04)' },
   logoContainer: { alignItems: 'center' },
-  // 🚀 ปรับขนาดรูปโลโก้ให้ใหญ่ขึ้น
-  logoImage: { width: 220, height: 150, marginBottom: -25 }, 
+  // ปรับแต่งขนาดโลโก้ใหม่ให้ดูลงตัวกับ Header
+  logoImage: { width: 260, height: 160, marginBottom: -30 }, 
   logoText: { color: '#FFF', fontSize: 32, fontWeight: 'bold', marginTop: 5 },
   
   bottomCard: { flex: 1, backgroundColor: '#FFF', borderTopLeftRadius: 40, borderTopRightRadius: 40, paddingHorizontal: 25, paddingVertical: 30, marginTop: -40 },
